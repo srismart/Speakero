@@ -1,0 +1,10 @@
+fastapi
+uvicorn[standard]
+python-socketio
+python-dotenv
+smallestai
+anthropic
+httpx
+websockets
+aiofiles
+aiohttp
