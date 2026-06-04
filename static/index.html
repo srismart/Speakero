@@ -466,7 +466,6 @@
 
     /* ── TRANSCRIPT PANEL ────────────────────────────────────────────────────── */
     .transcript-card {
-      min-height: 320px;
       display: flex;
       flex-direction: column;
       padding: 20px;
@@ -519,7 +518,9 @@
     }
 
     #transcript {
-      height: 260px;
+      min-height: 80px;
+      max-height: 380px;
+      height: auto;
       overflow-y: auto;
       font-family: 'JetBrains Mono', monospace;
       font-size: 0.88rem;
@@ -707,12 +708,40 @@
     /* ── DEBRIEF SECTION ─────────────────────────────────────────────────────── */
     #debriefSection {
       display: none;
-      margin-top: 16px;
+      position: fixed;
+      inset: 0;
+      z-index: 500;
+      background: rgba(2,6,23,0.85);
+      backdrop-filter: blur(8px);
+      overflow-y: auto;
+      padding: 80px 24px 120px;
     }
 
+    #debriefSection.open { display: block; }
+
     .debrief-card {
+      max-width: 860px;
+      margin: 0 auto;
       padding: 28px;
+      position: relative;
     }
+
+    #btnCloseDebrief {
+      position: sticky;
+      top: 0;
+      float: right;
+      margin-bottom: 8px;
+      background: rgba(51,65,85,0.7);
+      border: 1px solid rgba(71,85,105,0.5);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 6px 16px;
+      font-size: 0.82rem;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      z-index: 10;
+    }
+    #btnCloseDebrief:hover { background: rgba(71,85,105,0.8); }
 
     .debrief-title-row {
       display: flex;
@@ -1108,9 +1137,10 @@
     <!-- Report loading -->
     <div id="reportLoading">Generating debrief with Claude…</div>
 
-    <!-- Debrief section -->
+    <!-- Debrief section (modal overlay) -->
     <div id="debriefSection">
       <div class="bento-card debrief-card">
+        <button id="btnCloseDebrief">✕ Close</button>
         <div class="debrief-title-row">
           <span class="debrief-title">Session Debrief</span>
           <span class="debrief-topic" id="debriefTopic"></span>
@@ -1211,6 +1241,7 @@
     let audioWs = null;
     let nudgeTimeout = null;
     let streakTimeout = null;
+    let ttsCtx = null; // shared AudioContext for TTS — created on first user gesture
     let transcriptCleared = false;
     let sessionMode = 'individual';
 
@@ -1240,6 +1271,17 @@
 
     // ── Socket.IO ──────────────────────────────────────────────────────────────
     const socket = io({ transports: ['websocket', 'polling'] });
+
+    // Disable Start until the socket handshake completes and we have a stable sid
+    document.getElementById('btnStart').disabled = true;
+    socket.on('connect', () => {
+      document.getElementById('btnStart').disabled = false;
+      setStatus('Ready');
+    });
+    socket.on('disconnect', () => {
+      document.getElementById('btnStart').disabled = true;
+      setStatus('Reconnecting...');
+    });
 
     socket.on('event', (data) => {
       switch (data.type) {
@@ -1485,18 +1527,21 @@
     // ── TTS ────────────────────────────────────────────────────────────────────
     async function playNudgeAudio(text) {
       try {
+        // Reuse a single AudioContext — browsers block new ones without user gesture
+        if (!ttsCtx) ttsCtx = new AudioContext();
+        if (ttsCtx.state === 'suspended') await ttsCtx.resume();
+
         const res = await fetch('/api/speak', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text }),
         });
-        if (!res.ok) return;
+        if (!res.ok) { console.warn('[tts] /api/speak returned', res.status); return; }
         const arrayBuffer = await res.arrayBuffer();
-        const ctx = new AudioContext();
-        const decoded = await ctx.decodeAudioData(arrayBuffer);
-        const src = ctx.createBufferSource();
+        const decoded = await ttsCtx.decodeAudioData(arrayBuffer);
+        const src = ttsCtx.createBufferSource();
         src.buffer = decoded;
-        src.connect(ctx.destination);
+        src.connect(ttsCtx.destination);
         src.start();
       } catch (e) { console.warn('[tts] Audio playback failed:', e); }
     }
@@ -1527,7 +1572,7 @@
       processorNode.connect(audioContext.destination);
 
       const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
-      audioWs = new WebSocket(`${wsProto}://${location.host}/ws/audio?sample_rate=${audioContext.sampleRate}`);
+      audioWs = new WebSocket(`${wsProto}://${location.host}/ws/audio?sample_rate=${audioContext.sampleRate}&sid=${socket.id}`);
       audioWs.binaryType = 'arraybuffer';
       audioWs.onopen = () => setStatus('Streaming…', true);
       audioWs.onclose = () => { if (sessionActive) setStatus('Reconnecting…'); };
@@ -1559,10 +1604,14 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            sid: socket.id,
             mode: sessionMode,
             topic: document.getElementById('topicInput').value.trim(),
           }),
         });
+        // Prime TTS AudioContext during user gesture so it's unlocked for socket-triggered nudges
+        if (!ttsCtx) ttsCtx = new AudioContext();
+
         await startAudioCapture();
 
         sessionActive = true;
@@ -1576,7 +1625,7 @@
         document.getElementById('wpmValue').textContent = '—';
         document.getElementById('fillerCount').textContent = '0';
         document.getElementById('pauseCount').textContent = '0';
-        document.getElementById('debriefSection').style.display = 'none';
+        document.getElementById('debriefSection').classList.remove('open');
         document.getElementById('reportLoading').style.display = 'none';
         updateSessionSummary();
 
@@ -1599,7 +1648,11 @@
       stopAudioCapture();
       stopTimer();
       setVisualizerActive(false);
-      await fetch('/api/stop', { method: 'POST' });
+      await fetch('/api/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sid: socket.id }),
+      });
 
       document.getElementById('btnStart').disabled = false;
       document.getElementById('btnStart').classList.add('pulsing');
@@ -1610,17 +1663,37 @@
       if (cursorEl && cursorEl.parentNode) cursorEl.parentNode.removeChild(cursorEl);
     });
 
-    // ── End & Debrief ──────────────────────────────────────────────────────────
+    // ── End & Debrief — stops session then generates report ───────────────────
     document.getElementById('btnReport').addEventListener('click', async () => {
+      // Stop session first if still active
+      if (sessionActive) {
+        sessionActive = false;
+        stopAudioCapture();
+        stopTimer();
+        setVisualizerActive(false);
+        await fetch('/api/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sid: socket.id }),
+        });
+        document.getElementById('btnStart').disabled = false;
+        document.getElementById('btnStart').classList.add('pulsing');
+        document.getElementById('btnStop').disabled = true;
+        setStatus('Stopped');
+      }
+
+      // Ensure TTS context is unlocked — this click counts as a user gesture
+      if (!ttsCtx) ttsCtx = new AudioContext();
+      if (ttsCtx.state === 'suspended') ttsCtx.resume();
+
       document.getElementById('btnReport').disabled = true;
       document.getElementById('reportLoading').style.display = 'block';
-      document.getElementById('debriefSection').style.display = 'none';
       const topic = document.getElementById('topicInput').value.trim();
       try {
         const res = await fetch('/api/report', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ topic }),
+          body: JSON.stringify({ sid: socket.id, topic }),
         });
         const data = await res.json();
         renderDebrief(data);
@@ -1630,6 +1703,10 @@
         document.getElementById('reportLoading').style.display = 'none';
         document.getElementById('btnReport').disabled = false;
       }
+    });
+
+    document.getElementById('btnCloseDebrief').addEventListener('click', () => {
+      document.getElementById('debriefSection').classList.remove('open');
     });
 
     // ── Debrief rendering ──────────────────────────────────────────────────────
@@ -1704,8 +1781,11 @@
 
       document.getElementById('debriefSummary').textContent = data.summary || '';
 
-      // Spoken feedback
-      const spokenText = data.spoken_feedback || '';
+      // Spoken feedback — fall back to first improvement or summary if field is empty
+      const spokenText = data.spoken_feedback
+        || (data.improvements && data.improvements[0])
+        || data.summary
+        || '';
       const sfBar = document.getElementById('spokenFeedbackBar');
       if (spokenText) {
         document.getElementById('spokenFeedbackText').textContent = spokenText;
@@ -1716,8 +1796,8 @@
         sfBar.style.display = 'none';
       }
 
-      // Example extract
-      const extract = data.example_extract || '';
+      // Example extract — fall back to summary if field is empty
+      const extract = data.example_extract || data.summary || '';
       const exBlock = document.getElementById('exampleExtractBlock');
       if (extract) {
         document.getElementById('exampleExtractText').textContent = extract;
@@ -1727,8 +1807,9 @@
         exBlock.style.display = 'none';
       }
 
-      document.getElementById('debriefSection').style.display = 'block';
-      document.getElementById('debriefSection').scrollIntoView({ behavior: 'smooth' });
+      const ds = document.getElementById('debriefSection');
+      ds.classList.add('open');
+      ds.scrollTop = 0;
     }
   </script>
 </body>
