@@ -164,3 +164,23 @@ class FillerDetector:
 
         worst = max(eligible, key=density)
         return {"text": worst["text"], "start": worst["audio_start"], "end": worst["audio_end"]}
+
+    def get_replay_windows(self) -> dict:
+        """Return {"best": window|None, "worst": window|None} for audio replay.
+
+        Each window is {"text", "start", "end"}. A window is only returned when it
+        has a real audio span (end > start). If best and worst are the same span,
+        worst is dropped.
+        """
+        def valid(w: dict | None) -> bool:
+            return w is not None and w["end"] > w["start"]
+
+        best = self.get_best_window()
+        worst = self.get_worst_window()
+        best = best if valid(best) else None
+        worst = worst if valid(worst) else None
+
+        if best and worst and best["start"] == worst["start"] and best["end"] == worst["end"]:
+            worst = None
+
+        return {"best": best, "worst": worst}

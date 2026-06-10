@@ -56,3 +56,32 @@ def test_worst_window_ignores_trivial_and_clean_windows():
         {"word": "now", "start": 1.4, "end": 1.8},
     ])
     assert d.get_worst_window() is None
+
+
+def test_replay_windows_single_clean_window_has_no_worst():
+    d = FillerDetector()
+    d.start_session()
+    d.process_words([
+        {"word": "hello", "start": 0.0, "end": 0.5},
+        {"word": "world", "start": 0.5, "end": 1.0},
+        {"word": "again", "start": 1.0, "end": 1.4},
+        {"word": "now", "start": 1.4, "end": 1.8},
+    ])
+    rw = d.get_replay_windows()
+    assert rw["best"] is not None
+    assert rw["worst"] is None
+
+
+def test_replay_windows_gated_on_real_timestamps():
+    d = FillerDetector()
+    d.start_session()
+    # all-zero timestamps (offline / transcript fallback) -> not eligible
+    d.process_words([
+        {"word": "um", "start": 0.0, "end": 0.0},
+        {"word": "like", "start": 0.0, "end": 0.0},
+        {"word": "basically", "start": 0.0, "end": 0.0},
+        {"word": "thing", "start": 0.0, "end": 0.0},
+    ])
+    rw = d.get_replay_windows()
+    assert rw["best"] is None
+    assert rw["worst"] is None
