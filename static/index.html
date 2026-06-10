@@ -958,12 +958,19 @@
 
     #reportLoading {
       text-align: center;
-      color: var(--muted);
-      padding: 24px 0;
+      color: var(--accent, #38bdf8);
+      padding: 28px 0;
       font-family: 'Inter', sans-serif;
-      font-size: 0.9rem;
+      font-size: 1.05rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
       display: none;
+      animation: reportPulse 1.4s ease-in-out infinite;
     }
+    @keyframes reportPulse { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+    .replay-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+    .replay-text { font-size: 0.9rem; opacity: 0.85; }
 
     /* ── SCROLLBAR global ────────────────────────────────────────────────────── */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -975,8 +982,6 @@
       .bento-grid { grid-template-columns: 1fr; }
       .metrics-row { grid-template-columns: repeat(3, 1fr); }
       .debrief-grid { grid-template-columns: 1fr; }
-      .replay-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
-      .replay-text { font-size: 0.9rem; opacity: 0.85; }
     }
     @media (max-width: 600px) {
       .metrics-row { grid-template-columns: 1fr; }
@@ -1137,7 +1142,7 @@
     </div><!-- /bento-grid -->
 
     <!-- Report loading -->
-    <div id="reportLoading">Generating debrief with Claude…</div>
+    <div id="reportLoading">⏳ Preparing your debrief… this takes a few seconds.</div>
 
     <!-- Debrief section (modal overlay) -->
     <div id="debriefSection">
@@ -1698,8 +1703,6 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ sid: socket.id }),
         });
-        document.getElementById('btnStart').disabled = false;
-        document.getElementById('btnStart').classList.add('pulsing');
         document.getElementById('btnStop').disabled = true;
         setStatus('Stopped');
       }
@@ -1708,8 +1711,13 @@
       if (!ttsCtx) ttsCtx = new AudioContext();
       if (ttsCtx.state === 'suspended') ttsCtx.resume();
 
+      // Lock controls while the debrief is being prepared so there's a clear "wait" state
+      const startBtn = document.getElementById('btnStart');
+      startBtn.disabled = true;
+      startBtn.classList.remove('pulsing');
       document.getElementById('btnReport').disabled = true;
       document.getElementById('reportLoading').style.display = 'block';
+      setStatus('Preparing debrief…');
       const topic = document.getElementById('topicInput').value.trim();
       try {
         const res = await fetch('/api/report', {
@@ -1724,6 +1732,11 @@
       } finally {
         document.getElementById('reportLoading').style.display = 'none';
         document.getElementById('btnReport').disabled = false;
+        // Restore the mic for the next session only after the debrief is ready
+        const startBtn = document.getElementById('btnStart');
+        startBtn.disabled = false;
+        startBtn.classList.add('pulsing');
+        setStatus('Ready');
       }
     });
 

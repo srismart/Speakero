@@ -1,0 +1,20 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:waves-docs.smallest.ai)",
+      "WebFetch(domain:docs.smallest.ai)",
+      "Bash(tasklist /FI 'IMAGENAME eq python.exe' /FO LIST)",
+      "Bash(netstat -ano)",
+      "Bash(tasklist /FI \"PID eq 87308\" /FO LIST)",
+      "Bash(Get-Process -Id 87308)",
+      "Bash(wmic process:*)",
+      "Bash(taskkill /PID 87308 /F)",
+      "Bash(taskkill /PID 87308 /T /F)",
+      "Bash(git fetch *)",
+      "Bash(git ls-tree *)",
+      "Bash(pip show *)",
+      "mcp__plugin_playwright_playwright__browser_snapshot",
+      "mcp__plugin_playwright_playwright__browser_console_messages"
+    ]
+  }
+}
