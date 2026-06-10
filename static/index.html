@@ -975,6 +975,8 @@
       .bento-grid { grid-template-columns: 1fr; }
       .metrics-row { grid-template-columns: repeat(3, 1fr); }
       .debrief-grid { grid-template-columns: 1fr; }
+      .replay-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+      .replay-text { font-size: 0.9rem; opacity: 0.85; }
     }
     @media (max-width: 600px) {
       .metrics-row { grid-template-columns: 1fr; }
@@ -1199,6 +1201,19 @@
         <div id="highlightMomentBlock" style="display:none" class="highlight-box">
           <div class="hl-label">Highlight Moment — Best Delivery</div>
           <p id="highlightMomentText"></p>
+        </div>
+
+        <!-- Voice replay (the speaker's real audio) -->
+        <div id="replayBlock" style="display:none" class="example-box">
+          <div class="ex-label">Replay Your Voice</div>
+          <div class="replay-row">
+            <button class="btn-hear" id="btnPlayBest">&#9654; Your strongest moment</button>
+            <span class="replay-text" id="bestMomentText"></span>
+          </div>
+          <div class="replay-row">
+            <button class="btn-hear" id="btnPlayWorst">&#9654; Your roughest moment</button>
+            <span class="replay-text" id="worstMomentText"></span>
+          </div>
         </div>
 
         <!-- Example extract -->
@@ -1746,6 +1761,38 @@
       }
     }
 
+    function playPcmRange(startSec, endSec) {
+      if (!sessionPcm.length || !sessionPcmRate) return;
+      const total = sessionPcm.reduce((n, c) => n + c.length, 0);
+      const from = Math.min(Math.max(0, Math.floor(startSec * sessionPcmRate)), total);
+      const to = Math.min(Math.max(from, Math.floor(endSec * sessionPcmRate)), total);
+      const length = to - from;
+      if (length <= 0) return;
+
+      const out = new Float32Array(length);
+      let pos = 0, copied = 0;
+      for (const chunk of sessionPcm) {
+        const chunkStart = pos;
+        const chunkEnd = pos + chunk.length;
+        if (chunkEnd > from && chunkStart < to) {
+          const s = Math.max(0, from - chunkStart);
+          const e = Math.min(chunk.length, to - chunkStart);
+          out.set(chunk.subarray(s, e), copied);
+          copied += (e - s);
+        }
+        pos = chunkEnd;
+      }
+
+      if (!ttsCtx) ttsCtx = new AudioContext();
+      if (ttsCtx.state === 'suspended') ttsCtx.resume();
+      const buf = ttsCtx.createBuffer(1, out.length, sessionPcmRate);
+      buf.getChannelData(0).set(out);
+      const src = ttsCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ttsCtx.destination);
+      src.start();
+    }
+
     function renderDebrief(data) {
       document.getElementById('debriefTopic').textContent = data.topic_identified ? '— ' + data.topic_identified : '';
 
@@ -1812,6 +1859,36 @@
         document.getElementById('btnPlayExample').onclick = () => playNudgeAudio(extract);
       } else {
         exBlock.style.display = 'none';
+      }
+
+      // Voice replay card — real audio of best/worst moments
+      const replay = data.replay || {};
+      const best = replay.best;
+      const worst = replay.worst;
+      const haveAudio = sessionPcm.length > 0 && sessionPcmRate > 0;
+      const replayBlock = document.getElementById('replayBlock');
+      if (haveAudio && (best || worst)) {
+        const bestBtn = document.getElementById('btnPlayBest');
+        if (best) {
+          document.getElementById('bestMomentText').textContent = best.text || '';
+          bestBtn.style.display = '';
+          bestBtn.onclick = () => playPcmRange(best.start, best.end);
+        } else {
+          bestBtn.style.display = 'none';
+          document.getElementById('bestMomentText').textContent = '';
+        }
+        const worstBtn = document.getElementById('btnPlayWorst');
+        if (worst) {
+          document.getElementById('worstMomentText').textContent = worst.text || '';
+          worstBtn.style.display = '';
+          worstBtn.onclick = () => playPcmRange(worst.start, worst.end);
+        } else {
+          worstBtn.style.display = 'none';
+          document.getElementById('worstMomentText').textContent = '';
+        }
+        replayBlock.style.display = 'block';
+      } else {
+        replayBlock.style.display = 'none';
       }
 
       const ds = document.getElementById('debriefSection');
