@@ -143,3 +143,24 @@ class FillerDetector:
 
         best = max(self._word_windows, key=score)
         return {"text": best["text"], "start": best["audio_start"], "end": best["audio_end"]}
+
+    def get_worst_window(self) -> dict | None:
+        """Return the roughest window: highest filler density.
+
+        Requires at least 4 tokens (words + fillers) so trivial stumbles do not
+        win, and at least one filler to be a meaningful "worst". Returns
+        {"text", "start", "end"} or None.
+        """
+        eligible = [
+            w for w in self._word_windows
+            if (len(w["words"]) + len(w["fillers"])) >= 4 and len(w["fillers"]) > 0
+        ]
+        if not eligible:
+            return None
+
+        def density(w: dict) -> float:
+            total = len(w["words"]) + len(w["fillers"])
+            return len(w["fillers"]) / total if total else 0.0
+
+        worst = max(eligible, key=density)
+        return {"text": worst["text"], "start": worst["audio_start"], "end": worst["audio_end"]}

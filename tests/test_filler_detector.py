@@ -20,3 +20,39 @@ def test_best_window_is_none_when_no_windows():
     d = FillerDetector()
     d.start_session()
     assert d.get_best_window() is None
+
+
+def test_worst_window_picks_highest_filler_density():
+    d = FillerDetector()
+    d.start_session()
+    # clean window (no fillers)
+    d.process_words([
+        {"word": "we", "start": 0.0, "end": 0.2},
+        {"word": "build", "start": 0.2, "end": 0.6},
+        {"word": "products", "start": 0.6, "end": 1.1},
+        {"word": "daily", "start": 1.1, "end": 1.5},
+    ])
+    # filler-heavy window: um, like, basically are fillers; "stuff" is the only word
+    d.process_words([
+        {"word": "um", "start": 2.0, "end": 2.2},
+        {"word": "like", "start": 2.2, "end": 2.4},
+        {"word": "basically", "start": 2.4, "end": 2.8},
+        {"word": "stuff", "start": 2.8, "end": 3.1},
+    ])
+    ww = d.get_worst_window()
+    assert ww["start"] == 2.0
+    assert ww["end"] == 3.1
+    assert ww["text"] == "stuff"
+
+
+def test_worst_window_ignores_trivial_and_clean_windows():
+    d = FillerDetector()
+    d.start_session()
+    # a clean window with no fillers -> not a valid "worst"
+    d.process_words([
+        {"word": "hello", "start": 0.0, "end": 0.5},
+        {"word": "world", "start": 0.5, "end": 1.0},
+        {"word": "again", "start": 1.0, "end": 1.4},
+        {"word": "now", "start": 1.4, "end": 1.8},
+    ])
+    assert d.get_worst_window() is None
