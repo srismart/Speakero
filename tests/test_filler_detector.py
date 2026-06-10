@@ -85,3 +85,16 @@ def test_replay_windows_gated_on_real_timestamps():
     rw = d.get_replay_windows()
     assert rw["best"] is None
     assert rw["worst"] is None
+
+
+def test_best_window_none_when_only_filler_windows():
+    # An all-filler chunk produces a window with empty text but a real span.
+    # It must not surface as the "best" window (review item 1).
+    d = FillerDetector()
+    d.start_session()
+    d.process_words([
+        {"word": "um", "start": 1.0, "end": 1.2},
+        {"word": "uh", "start": 1.2, "end": 1.4},
+    ])
+    assert d.get_best_window() is None
+    assert d.get_replay_windows()["best"] is None

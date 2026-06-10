@@ -391,7 +391,9 @@ async def _offline_mode(websocket: WebSocket, sess: SessionState, sid: str):
             await websocket.receive_bytes()
             counter += 1
             if counter % 20 == 0:
-                word_obj = [{"word": mock_words[counter // 20 % len(mock_words)], "start": float(counter), "end": float(counter) + 0.4}]
+                # No real word timestamps in offline mode — keep them zeroed so the
+                # replay windows stay gated out and the debrief replay card stays hidden.
+                word_obj = [{"word": mock_words[counter // 20 % len(mock_words)], "start": 0.0, "end": 0.0}]
                 result = sess.detector.process_words(word_obj)
                 text = word_obj[0]["word"]
                 sess.add_text(text)

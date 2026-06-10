@@ -142,6 +142,9 @@ class FillerDetector:
             return word_count * (1.0 - filler_ratio)
 
         best = max(self._word_windows, key=score)
+        if len(best["words"]) == 0:
+            # Only all-filler windows exist — none is a real "best" delivery.
+            return None
         return {"text": best["text"], "start": best["audio_start"], "end": best["audio_end"]}
 
     def get_worst_window(self) -> dict | None:
