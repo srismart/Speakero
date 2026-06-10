@@ -210,6 +210,7 @@ async def api_report(request: Request):
             mode=mode,
             highlight_window=highlight_window,
         )
+        report["replay"] = sess.detector.get_replay_windows()
         return JSONResponse(report)
     except Exception as e:
         print(f"[report] Error: {e}")
