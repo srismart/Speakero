@@ -162,13 +162,34 @@ Completes the before/after. Sits behind the provider abstraction (roadmap #1).
     (same content, cleaned up) to `/api/clone_speak`.
   - Plays the returned clip right after the real "before" clip, so the user hears the same
     content rough-then-polished in their own voice.
-- First use shows a one-time **consent disclosure**: "we use a few seconds of your audio
-  to generate this clip, then discard it." No call is made without consent.
+- First use shows a one-time **consent gate**. No call to `/api/clone_speak` is made until
+  the user explicitly accepts. The acceptance is recorded (locally for now; tied to the
+  user account once auth lands). Exact copy:
+
+  > By using this feature, I confirm that I have all necessary legal rights, licenses,
+  > consents, and permissions to use any uploaded or recorded voice references. I agree
+  > not to misuse the feature and acknowledge that I am solely responsible for my use of
+  > it and for any legal consequences arising from such use. I have also read the privacy
+  > policy and terms of use and I agree to adhere to them.
+
+  With links to the smallest.ai policies (the cloning provider):
+  - Privacy policy: https://smallest.ai/privacy-policy
+  - Terms and conditions: https://smallest.ai/terms-and-conditions
+
+  Note: these links must be updated if/when the cloning provider changes (e.g. to
+  Cartesia). The consent copy is provider-neutral; only the policy links are
+  provider-specific.
 
 ### Premium gating
 
 - Auth/billing (#2/#4) do not exist yet. Increment 2 ships behind a simple feature flag,
   with a TODO to wire real metering/entitlement when billing lands.
+- **This feature is a primary driver to prioritize auth/billing.** The cloned "after" is
+  the premium hook, the consent acceptance needs to be bound to a user identity (not just
+  local state), and the per-debrief clone cost needs to be metered to a billable account.
+  So the natural sequence is: Increment 1 (free, now) -> Increment 2 behind a flag ->
+  auth + billing (#2/#4) -> flip the flag into real entitlement + metering. Auth/billing
+  is its own spec; this spec only leaves a clean seam for it.
 
 ### Cost posture
 
@@ -202,7 +223,7 @@ Completes the before/after. Sits behind the provider abstraction (roadmap #1).
 ## Setup checklist for the user
 
 - **Increment 1:** nothing.
-- **Increment 2:** confirm the smallest.ai plan permits voice cloning (`add_voice`
-  access). SDK (`smallestai` 4.3.8) and `SMALLEST_API_KEY` are already in place; no new
-  dependency or secret.
+- **Increment 2:** voice cloning is confirmed available on the user's smallest.ai account.
+  SDK (`smallestai` 4.3.8) and `SMALLEST_API_KEY` are already in place; no new dependency
+  or secret. Nothing further to set up.
 - **Cartesia (later):** add `CARTESIA_API_KEY` when adopting that provider.
