@@ -89,11 +89,15 @@ class FillerDetector:
         # Record this chunk for highlight reel
         chunk_text = " ".join(chunk_words)
         if chunk_text.strip() or chunk_fillers:
+            starts = [w.get("start", 0.0) for w in words]
+            ends = [w.get("end", w.get("start", 0.0)) for w in words]
             self._word_windows.append({
                 "text": chunk_text,
                 "t": chunk_t,
                 "fillers": list(chunk_fillers),
                 "words": list(chunk_words),
+                "audio_start": min(starts) if starts else 0.0,
+                "audio_end": max(ends) if ends else 0.0,
             })
 
         # Streak detection: count fillers in the last STREAK_WINDOW_SECONDS
@@ -121,19 +125,21 @@ class FillerDetector:
     def get_transcript(self) -> str:
         return " ".join(self._transcript_words)
 
-    def get_best_window(self) -> str:
-        """Return the chunk with the best delivery: most words, fewest fillers ratio."""
+    def get_best_window(self) -> dict | None:
+        """Return the best-delivery window: most words, lowest filler ratio.
+
+        Returns {"text", "start", "end"} or None if no windows recorded.
+        """
         if not self._word_windows:
-            return ""
+            return None
 
         def score(w: dict) -> float:
             word_count = len(w["words"])
             filler_count = len(w["fillers"])
             if word_count == 0:
                 return -1.0
-            # Higher word count and lower filler ratio is better
             filler_ratio = filler_count / (word_count + filler_count)
             return word_count * (1.0 - filler_ratio)
 
         best = max(self._word_windows, key=score)
-        return best["text"]
+        return {"text": best["text"], "start": best["audio_start"], "end": best["audio_end"]}

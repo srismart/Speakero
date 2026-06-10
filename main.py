@@ -200,7 +200,8 @@ async def api_report(request: Request):
     stats = sess.detector.get_stats()
     topic = data.get("topic", "")
     mode = sess.mode
-    highlight_window = sess.detector.get_best_window()
+    best_window = sess.detector.get_best_window()
+    highlight_window = best_window["text"] if best_window else ""
     try:
         report = await generate_report(
             transcript,
