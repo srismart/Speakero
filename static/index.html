@@ -1242,6 +1242,8 @@
     let nudgeTimeout = null;
     let streakTimeout = null;
     let ttsCtx = null; // shared AudioContext for TTS — created on first user gesture
+    let sessionPcm = [];     // array of Float32Array chunks for the whole session
+    let sessionPcmRate = 0;  // sample rate of the captured audio
     let transcriptCleared = false;
     let sessionMode = 'individual';
 
@@ -1550,6 +1552,7 @@
     async function startAudioCapture() {
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       audioContext = new AudioContext();
+      sessionPcmRate = audioContext.sampleRate;
 
       const source = audioContext.createMediaStreamSource(mediaStream);
       const bufferSize = 4096;
@@ -1562,6 +1565,8 @@
         for (let i = 0; i < float32.length; i++) sumSq += float32[i] * float32[i];
         const rms = Math.sqrt(sumSq / float32.length);
         updateEnergyBar(rms);
+
+        sessionPcm.push(new Float32Array(float32));
 
         if (!audioWs || audioWs.readyState !== WebSocket.OPEN) return;
         const pcm16 = float32ToPcm16(float32);
@@ -1612,6 +1617,8 @@
         // Prime TTS AudioContext during user gesture so it's unlocked for socket-triggered nudges
         if (!ttsCtx) ttsCtx = new AudioContext();
 
+        sessionPcm = [];
+        sessionPcmRate = 0;
         await startAudioCapture();
 
         sessionActive = true;
