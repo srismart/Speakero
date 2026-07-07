@@ -98,3 +98,82 @@ def test_best_window_none_when_only_filler_windows():
     ])
     assert d.get_best_window() is None
     assert d.get_replay_windows()["best"] is None
+
+
+def test_replay_candidates_indexes_eligible_windows():
+    d = FillerDetector()
+    d.start_session()
+    d.process_words([
+        {"word": "we", "start": 0.0, "end": 0.3},
+        {"word": "ship", "start": 0.3, "end": 0.7},
+        {"word": "fast", "start": 0.7, "end": 1.0},
+        {"word": "today", "start": 1.0, "end": 1.4},
+    ])
+    d.process_words([
+        {"word": "hey", "start": 2.0, "end": 2.3},
+        {"word": "yeah", "start": 2.3, "end": 2.6},
+        {"word": "my", "start": 2.6, "end": 2.8},
+        {"word": "product", "start": 2.8, "end": 3.2},
+    ])
+    cands = d.get_replay_candidates()
+    assert [c["index"] for c in cands] == [0, 1]
+    assert cands[0]["text"] == "we ship fast today"
+
+
+def test_window_by_index_returns_span_or_none():
+    d = FillerDetector()
+    d.start_session()
+    d.process_words([
+        {"word": "hello", "start": 0.0, "end": 0.5},
+        {"word": "world", "start": 0.5, "end": 1.0},
+    ])
+    w = d.get_window_by_index(0)
+    assert w["text"] == "hello world"
+    assert w["start"] == 0.0 and w["end"] == 1.0
+    assert d.get_window_by_index(5) is None
+    assert d.get_window_by_index(-1) is None
+    assert d.get_window_by_index(None) is None
+
+
+def test_replay_windows_uses_claude_roughest_index():
+    d = FillerDetector()
+    d.start_session()
+    d.process_words([
+        {"word": "we", "start": 0.0, "end": 0.3},
+        {"word": "ship", "start": 0.3, "end": 0.7},
+        {"word": "fast", "start": 0.7, "end": 1.0},
+        {"word": "today", "start": 1.0, "end": 1.4},
+    ])
+    # rambling but no filler words — heuristic would miss it, Claude picks it
+    d.process_words([
+        {"word": "hey", "start": 2.0, "end": 2.3},
+        {"word": "yeah", "start": 2.3, "end": 2.6},
+        {"word": "my", "start": 2.6, "end": 2.8},
+        {"word": "product", "start": 2.8, "end": 3.2},
+    ])
+    rw = d.get_replay_windows(roughest_index=1)
+    assert rw["worst"]["text"] == "hey yeah my product"
+    assert rw["worst"]["start"] == 2.0
+
+
+def test_replay_windows_invalid_index_falls_back_to_heuristic():
+    d = FillerDetector()
+    d.start_session()
+    # clean window (becomes best)
+    d.process_words([
+        {"word": "we", "start": 0.0, "end": 0.3},
+        {"word": "ship", "start": 0.3, "end": 0.7},
+        {"word": "fast", "start": 0.7, "end": 1.0},
+        {"word": "today", "start": 1.0, "end": 1.4},
+    ])
+    # filler-heavy window (heuristic worst)
+    d.process_words([
+        {"word": "um", "start": 2.0, "end": 2.2},
+        {"word": "like", "start": 2.2, "end": 2.4},
+        {"word": "basically", "start": 2.4, "end": 2.8},
+        {"word": "stuff", "start": 2.8, "end": 3.1},
+    ])
+    # invalid Claude index -> fall back to filler-density heuristic
+    rw = d.get_replay_windows(roughest_index=99)
+    assert rw["worst"] is not None
+    assert rw["worst"]["text"] == "stuff"

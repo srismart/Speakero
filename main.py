@@ -209,8 +209,11 @@ async def api_report(request: Request):
             topic=topic,
             mode=mode,
             highlight_window=highlight_window,
+            candidate_windows=sess.detector.get_replay_candidates(),
         )
-        report["replay"] = sess.detector.get_replay_windows()
+        report["replay"] = sess.detector.get_replay_windows(
+            roughest_index=report.pop("roughest_window_index", None)
+        )
         return JSONResponse(report)
     except Exception as e:
         print(f"[report] Error: {e}")

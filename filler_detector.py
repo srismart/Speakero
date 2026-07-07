@@ -168,19 +168,47 @@ class FillerDetector:
         worst = max(eligible, key=density)
         return {"text": worst["text"], "start": worst["audio_start"], "end": worst["audio_end"]}
 
-    def get_replay_windows(self) -> dict:
+    def get_replay_candidates(self) -> List[dict]:
+        """Indexed list of replay-eligible windows (real audio span + has words),
+        for Claude to choose the roughest from. Capped to bound prompt size."""
+        cands = [
+            {"index": i, "text": w["text"]}
+            for i, w in enumerate(self._word_windows)
+            if w["audio_end"] > w["audio_start"] and len(w["words"]) > 0
+        ]
+        return cands[:25]
+
+    def get_window_by_index(self, index: Optional[int]) -> dict | None:
+        """Resolve a window index (into the recorded windows) to a replay span,
+        or None if the index is out of range or the window has no real audio."""
+        if index is None or not (0 <= index < len(self._word_windows)):
+            return None
+        w = self._word_windows[index]
+        if w["audio_end"] <= w["audio_start"] or len(w["words"]) == 0:
+            return None
+        return {"text": w["text"], "start": w["audio_start"], "end": w["audio_end"]}
+
+    def get_replay_windows(self, roughest_index: Optional[int] = None) -> dict:
         """Return {"best": window|None, "worst": window|None} for audio replay.
 
         Each window is {"text", "start", "end"}. A window is only returned when it
         has a real audio span (end > start). If best and worst are the same span,
         worst is dropped.
+
+        When `roughest_index` is given (Claude's pick), that window becomes the
+        "worst"; if it can't be resolved, we fall back to the filler-density
+        heuristic.
         """
         def valid(w: dict | None) -> bool:
             return w is not None and w["end"] > w["start"]
 
         best = self.get_best_window()
-        worst = self.get_worst_window()
         best = best if valid(best) else None
+
+        if roughest_index is not None:
+            worst = self.get_window_by_index(roughest_index) or self.get_worst_window()
+        else:
+            worst = self.get_worst_window()
         worst = worst if valid(worst) else None
 
         if best and worst and best["start"] == worst["start"] and best["end"] == worst["end"]:
