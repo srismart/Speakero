@@ -216,8 +216,20 @@ async def api_report(request: Request):
         )
         return JSONResponse(report)
     except Exception as e:
-        print(f"[report] Error: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
+        # Stats and replay windows are computed locally — never lose the session
+        # just because the AI analysis failed.
+        print(f"[report] Error: {e} — returning degraded report")
+        return JSONResponse({
+            "degraded": True,
+            "summary": "AI analysis is temporarily unavailable. Your session stats and replay are below.",
+            "topic_identified": "",
+            "strengths": [],
+            "improvements": [],
+            "content_feedback": [],
+            "filler_breakdown": stats.get("fillerBreakdown", {}),
+            "transcript": transcript,
+            "replay": sess.detector.get_replay_windows(),
+        })
 
 
 @fastapi_app.post("/api/start")
