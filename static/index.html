@@ -947,14 +947,74 @@
     .btn-hear:active { transform: scale(0.97); }
 
     #debriefSummary {
-      font-size: 0.9rem;
+      font-size: 0.92rem;
       font-family: 'Inter', sans-serif;
       line-height: 1.7;
       color: var(--slate-400);
-      border-top: 1px solid rgba(51,65,85,0.4);
-      padding-top: 16px;
-      margin-top: 4px;
+      margin: 4px 0 18px;
     }
+    #debriefSummary:empty { display: none; }
+
+    /* Your Moments card — merged highlight + replay + example */
+    .moments-box {
+      background: rgba(16,185,129,0.06);
+      border: 1px solid rgba(16,185,129,0.25);
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+    }
+    .moments-box .mo-label {
+      font-size: 0.68rem;
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--emerald);
+      margin-bottom: 4px;
+    }
+    .moment { padding: 12px 0; }
+    .moment + .moment { border-top: 1px solid rgba(51,65,85,0.4); }
+    .moment-note {
+      font-size: 0.88rem;
+      line-height: 1.6;
+      color: var(--slate-400);
+      font-family: 'Inter', sans-serif;
+      margin-top: 8px;
+    }
+    .moment-note:empty { display: none; }
+    .btn-best { background: var(--emerald); }
+    .btn-rough { background: var(--warn); }
+    .moment-fix {
+      margin-top: 12px;
+      background: rgba(6,182,212,0.07);
+      border: 1px solid rgba(6,182,212,0.25);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .moment-fix .fix-label {
+      font-size: 0.68rem;
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--cyan);
+      margin-bottom: 8px;
+    }
+    .moment-fix #exampleExtractText {
+      font-size: 0.9rem;
+      font-style: italic;
+      line-height: 1.6;
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      margin-bottom: 10px;
+    }
+
+    /* Collapsible content feedback */
+    details.debrief-block summary { cursor: pointer; list-style: none; }
+    details.debrief-block summary::-webkit-details-marker { display: none; }
+    details.debrief-block summary h3 { display: inline-block; margin-bottom: 6px; }
+    details.debrief-block summary h3::after { content: ' \25B8'; }
+    details[open].debrief-block summary h3::after { content: ' \25BE'; }
 
     #reportLoading {
       text-align: center;
@@ -1160,6 +1220,32 @@
           <button class="btn-replay" id="btnReplayFeedback">&#9654; Replay</button>
         </div>
 
+        <!-- Summary — lead with the overall assessment -->
+        <div id="debriefSummary"></div>
+
+        <!-- Your Moments — real best/roughest audio + Claude's take + the improved version -->
+        <div id="momentsBlock" style="display:none" class="moments-box">
+          <div class="mo-label">Your Moments</div>
+          <div class="moment" id="bestMoment" style="display:none">
+            <div class="replay-row">
+              <button class="btn-hear btn-best" id="btnPlayBest">&#9654; Strongest</button>
+              <span class="replay-text" id="bestMomentText"></span>
+            </div>
+            <p class="moment-note" id="highlightMomentText"></p>
+          </div>
+          <div class="moment" id="worstMoment" style="display:none">
+            <div class="replay-row">
+              <button class="btn-hear btn-rough" id="btnPlayWorst">&#9654; Roughest</button>
+              <span class="replay-text" id="worstMomentText"></span>
+            </div>
+            <div class="moment-fix" id="exampleExtractBlock" style="display:none">
+              <div class="fix-label">How it could sound</div>
+              <div id="exampleExtractText"></div>
+              <button class="btn-hear" id="btnPlayExample">&#9654; Hear Example</button>
+            </div>
+          </div>
+        </div>
+
         <!-- Strengths + Improvements -->
         <div class="debrief-grid">
           <div class="debrief-block">
@@ -1172,64 +1258,25 @@
           </div>
         </div>
 
-        <!-- Content feedback -->
-        <div class="debrief-block">
-          <h3>Content Feedback</h3>
-          <ul id="contentList"></ul>
-        </div>
-
         <!-- Filler breakdown -->
         <div class="debrief-block">
           <h3>Filler Breakdown</h3>
           <div class="chips-row" id="fillerChips"></div>
         </div>
 
-        <!-- Repetition flags -->
-        <div class="debrief-block">
-          <h3>Repetition Flags</h3>
+        <!-- Delivery flags — repetition, jargon, incomplete sentences; hidden when clean -->
+        <div class="debrief-block" id="deliveryFlagsBlock" style="display:none">
+          <h3>Delivery Flags</h3>
           <div class="chips-row" id="repetitionChips"></div>
-        </div>
-
-        <!-- Jargon flags -->
-        <div class="debrief-block">
-          <h3>Jargon Flags</h3>
           <div class="chips-row" id="jargonChips"></div>
-        </div>
-
-        <!-- Sentence completion -->
-        <div class="debrief-block">
-          <h3>Sentence Completion</h3>
           <div class="completion-line" id="sentenceCompletion"></div>
         </div>
 
-        <!-- Highlight moment -->
-        <div id="highlightMomentBlock" style="display:none" class="highlight-box">
-          <div class="hl-label">Highlight Moment — Best Delivery</div>
-          <p id="highlightMomentText"></p>
-        </div>
-
-        <!-- Voice replay (the speaker's real audio) -->
-        <div id="replayBlock" style="display:none" class="example-box">
-          <div class="ex-label">Replay Your Voice</div>
-          <div class="replay-row">
-            <button class="btn-hear" id="btnPlayBest">&#9654; Your strongest moment</button>
-            <span class="replay-text" id="bestMomentText"></span>
-          </div>
-          <div class="replay-row">
-            <button class="btn-hear" id="btnPlayWorst">&#9654; Your roughest moment</button>
-            <span class="replay-text" id="worstMomentText"></span>
-          </div>
-        </div>
-
-        <!-- Example extract -->
-        <div id="exampleExtractBlock" style="display:none" class="example-box">
-          <div class="ex-label">Example: How This Could Sound</div>
-          <div id="exampleExtractText"></div>
-          <button class="btn-hear" id="btnPlayExample">&#9654; Hear Example</button>
-        </div>
-
-        <!-- Summary -->
-        <div id="debriefSummary"></div>
+        <!-- Content feedback — collapsed by default -->
+        <details class="debrief-block" id="contentDetails">
+          <summary><h3>Content Feedback</h3></summary>
+          <ul id="contentList"></ul>
+        </details>
       </div>
     </div>
 
@@ -1811,7 +1858,13 @@
 
       renderList('strengthsList', data.strengths, 'strength-item');
       renderList('improveList', data.improvements, 'improve-item');
-      renderList('contentList', data.content_feedback, 'improve-item');
+
+      // Content feedback — collapsed by default, hidden entirely when empty
+      const content = data.content_feedback || [];
+      renderList('contentList', content, 'improve-item');
+      const contentDetails = document.getElementById('contentDetails');
+      contentDetails.style.display = content.length ? '' : 'none';
+      contentDetails.open = false;
 
       // Filler breakdown chips
       const chips = document.getElementById('fillerChips');
@@ -1833,18 +1886,21 @@
           });
       }
 
-      renderChips('repetitionChips', data.repetition_flags || [], 'rep-chip', 'None detected \u2713');
-      renderChips('jargonChips', data.jargon_flags || [], 'jargon-chip', 'None detected \u2713');
-
-      document.getElementById('sentenceCompletion').textContent = data.sentence_completion_rate || '';
-
-      const highlightText = data.highlight_moment || '';
-      if (highlightText) {
-        document.getElementById('highlightMomentText').textContent = highlightText;
-        document.getElementById('highlightMomentBlock').style.display = 'block';
-      } else {
-        document.getElementById('highlightMomentBlock').style.display = 'none';
-      }
+      // Delivery flags \u2014 one block for repetition, jargon, incomplete sentences.
+      // Clean signals are hidden instead of rendering "None detected" rows.
+      const reps = data.repetition_flags || [];
+      const jargon = data.jargon_flags || [];
+      const completion = (data.sentence_completion_rate || '').trim();
+      const completionNeedsWork = completion && !/^good/i.test(completion);
+      renderChips('repetitionChips', reps, 'rep-chip', '');
+      renderChips('jargonChips', jargon, 'jargon-chip', '');
+      document.getElementById('repetitionChips').style.display = reps.length ? '' : 'none';
+      document.getElementById('jargonChips').style.display = jargon.length ? '' : 'none';
+      const compEl = document.getElementById('sentenceCompletion');
+      compEl.textContent = completionNeedsWork ? completion : '';
+      compEl.style.display = completionNeedsWork ? '' : 'none';
+      document.getElementById('deliveryFlagsBlock').style.display =
+        (reps.length || jargon.length || completionNeedsWork) ? 'block' : 'none';
 
       document.getElementById('debriefSummary').textContent = data.summary || '';
 
@@ -1863,46 +1919,48 @@
         sfBar.style.display = 'none';
       }
 
-      // Example extract — fall back to summary if field is empty
-      const extract = data.example_extract || data.summary || '';
-      const exBlock = document.getElementById('exampleExtractBlock');
-      if (extract) {
-        document.getElementById('exampleExtractText').textContent = extract;
-        exBlock.style.display = 'block';
-        document.getElementById('btnPlayExample').onclick = () => playNudgeAudio(extract);
-      } else {
-        exBlock.style.display = 'none';
-      }
-
-      // Voice replay card — real audio of best/worst moments
+      // Your Moments — best/roughest real audio, Claude's take, and the improved version.
+      // Degrades gracefully: without audio (offline) the text insights still show,
+      // just without play buttons.
       const replay = data.replay || {};
       const best = replay.best;
       const worst = replay.worst;
       const haveAudio = sessionPcm.length > 0 && sessionPcmRate > 0;
-      const replayBlock = document.getElementById('replayBlock');
-      if (haveAudio && (best || worst)) {
-        const bestBtn = document.getElementById('btnPlayBest');
-        if (best) {
-          document.getElementById('bestMomentText').textContent = best.text || '';
-          bestBtn.style.display = '';
-          bestBtn.onclick = () => playPcmRange(best.start, best.end);
-        } else {
-          bestBtn.style.display = 'none';
-          document.getElementById('bestMomentText').textContent = '';
-        }
-        const worstBtn = document.getElementById('btnPlayWorst');
-        if (worst) {
-          document.getElementById('worstMomentText').textContent = worst.text || '';
-          worstBtn.style.display = '';
-          worstBtn.onclick = () => playPcmRange(worst.start, worst.end);
-        } else {
-          worstBtn.style.display = 'none';
-          document.getElementById('worstMomentText').textContent = '';
-        }
-        replayBlock.style.display = 'block';
+      const highlightText = data.highlight_moment || '';
+      const extract = data.example_extract || '';
+
+      const bestBtn = document.getElementById('btnPlayBest');
+      document.getElementById('bestMomentText').textContent = (best && best.text) || '';
+      document.getElementById('highlightMomentText').textContent = highlightText;
+      if (haveAudio && best) {
+        bestBtn.style.display = '';
+        bestBtn.onclick = () => playPcmRange(best.start, best.end);
       } else {
-        replayBlock.style.display = 'none';
+        bestBtn.style.display = 'none';
       }
+      const showBest = (haveAudio && best) || highlightText;
+      document.getElementById('bestMoment').style.display = showBest ? '' : 'none';
+
+      const worstBtn = document.getElementById('btnPlayWorst');
+      document.getElementById('worstMomentText').textContent = (worst && worst.text) || '';
+      if (haveAudio && worst) {
+        worstBtn.style.display = '';
+        worstBtn.onclick = () => playPcmRange(worst.start, worst.end);
+      } else {
+        worstBtn.style.display = 'none';
+      }
+      const fixBlock = document.getElementById('exampleExtractBlock');
+      if (extract) {
+        document.getElementById('exampleExtractText').textContent = extract;
+        fixBlock.style.display = '';
+        document.getElementById('btnPlayExample').onclick = () => playNudgeAudio(extract);
+      } else {
+        fixBlock.style.display = 'none';
+      }
+      const showWorst = (haveAudio && worst) || extract;
+      document.getElementById('worstMoment').style.display = showWorst ? '' : 'none';
+
+      document.getElementById('momentsBlock').style.display = (showBest || showWorst) ? 'block' : 'none';
 
       const ds = document.getElementById('debriefSection');
       ds.classList.add('open');
