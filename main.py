@@ -24,6 +24,7 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
 PULSE_WS_URL = "wss://api.smallest.ai/waves/v1/pulse/get_text"
 CHUNK_INTERVAL_SECONDS = 30
+GRACE_SECONDS = 90  # keep a disconnected session alive this long for reconnects
 
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
 
@@ -40,6 +41,8 @@ class SessionState:
         self.mode: str = "individual"
         self.topic: str = ""
         self.highlight_window: str = ""
+        self.room: str = ""
+        self.cleanup_task: asyncio.Task | None = None
 
     def start(self):
         self.active = True
@@ -113,8 +116,8 @@ async def _get_nudge_from_claude(transcript_snippet: str, sess: SessionState) ->
     return message.content[0].text.strip()
 
 
-async def coaching_loop(sess: SessionState, sid: str):
-    print(f"[agent] Coaching loop started for {sid}")
+async def coaching_loop(sess: SessionState):
+    print(f"[agent] Coaching loop started for {sess.room}")
     while True:
         await asyncio.sleep(CHUNK_INTERVAL_SECONDS)
 
@@ -127,11 +130,11 @@ async def coaching_loop(sess: SessionState, sid: str):
         if not snippet.strip():
             continue
 
-        print(f"[agent] Generating nudge for {sid} ({len(snippet)} chars)…")
+        print(f"[agent] Generating nudge for {sess.room} ({len(snippet)} chars)…")
         try:
             nudge = await _get_nudge_from_claude(snippet, sess)
             print(f"[agent] Nudge: {nudge}")
-            await sio.emit("event", {"type": "nudge", "text": nudge}, room=sid)
+            await sio.emit("event", {"type": "nudge", "text": nudge}, room=sess.room)
         except Exception as e:
             print(f"[agent] Error generating nudge: {e}")
 
@@ -148,17 +151,45 @@ fastapi_app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @sio.event
 async def connect(sid, environ):
-    SESSIONS[sid] = SessionState()
+    sess = SessionState()
+    sess.room = sid
+    SESSIONS[sid] = sess
     await sio.enter_room(sid, sid)
     print(f"[sio] Client connected: {sid}")
 
 
 @sio.event
 async def disconnect(sid):
-    sess = SESSIONS.pop(sid, None)
-    if sess and sess.coaching_task and not sess.coaching_task.done():
-        sess.coaching_task.cancel()
-    print(f"[sio] Client disconnected: {sid}")
+    sess = SESSIONS.get(sid)
+    if sess is None:
+        return
+    print(f"[sio] Client disconnected: {sid} — {GRACE_SECONDS}s grace before cleanup")
+
+    async def _cleanup():
+        await asyncio.sleep(GRACE_SECONDS)
+        gone = SESSIONS.pop(sid, None)
+        if gone and gone.coaching_task and not gone.coaching_task.done():
+            gone.coaching_task.cancel()
+        print(f"[sio] Session {sid} cleaned up after grace period")
+
+    sess.cleanup_task = asyncio.create_task(_cleanup())
+
+
+@sio.event
+async def resume(sid, data):
+    """Re-attach a reconnected client (new sid) to its pre-disconnect session."""
+    old_sid = (data or {}).get("old_sid", "")
+    old_sess = SESSIONS.get(old_sid)
+    if old_sess is None or old_sid == sid:
+        return {"resumed": False}
+    if old_sess.cleanup_task and not old_sess.cleanup_task.done():
+        old_sess.cleanup_task.cancel()
+    old_sess.cleanup_task = None
+    old_sess.room = sid
+    SESSIONS[sid] = old_sess
+    del SESSIONS[old_sid]
+    print(f"[sio] Session resumed: {old_sid} -> {sid}")
+    return {"resumed": True}
 
 
 @fastapi_app.get("/")
@@ -250,7 +281,7 @@ async def api_start(request: Request):
     sess.topic = topic
     if sess.coaching_task and not sess.coaching_task.done():
         sess.coaching_task.cancel()
-    sess.coaching_task = asyncio.create_task(coaching_loop(sess, sid))
+    sess.coaching_task = asyncio.create_task(coaching_loop(sess))
     return JSONResponse({"status": "started"})
 
 
