@@ -121,21 +121,31 @@ Return ONLY a valid JSON object (no markdown, no code fences) with exactly these
 Be specific, actionable, and encouraging. Base your analysis strictly on the data provided.
 For repetition_flags and jargon_flags: return actual empty arrays [] if there are no issues, not arrays with placeholder strings."""
 
-    message = await client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    report = None
+    parse_error: Exception | None = None
+    for _attempt in range(2):
+        message = await client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
 
-    raw = message.content[0].text.strip()
+        raw = message.content[0].text.strip()
 
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
 
-    report = json.loads(raw)
+        try:
+            report = json.loads(raw)
+            break
+        except json.JSONDecodeError as e:
+            parse_error = e
+
+    if report is None:
+        raise parse_error
 
     # Normalize Claude's roughest pick to a usable index or None (it may be
     # missing, -1, or a string). Callers pass it to get_replay_windows().
