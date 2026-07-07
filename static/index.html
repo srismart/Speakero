@@ -1032,6 +1032,28 @@
     .replay-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
     .replay-text { font-size: 0.9rem; opacity: 0.85; }
 
+    /* ── TOAST ───────────────────────────────────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 96px;
+      left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      background: var(--surface-solid);
+      border: 1px solid var(--border-solid);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.85rem;
+      padding: 10px 18px;
+      border-radius: 10px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s, transform 0.25s;
+      z-index: 200;
+      max-width: 80vw;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    #debriefSummary.degraded { color: var(--warn); }
+
     /* ── SCROLLBAR global ────────────────────────────────────────────────────── */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
     ::-webkit-scrollbar-track { background: transparent; }
@@ -1282,6 +1304,9 @@
 
   </div><!-- /main-wrapper -->
 
+  <!-- Toast notifications -->
+  <div id="toast"></div>
+
   <!-- Fixed control bar -->
   <div class="control-bar">
     <button class="btn-mic pulsing" id="btnStart" title="Start Session">
@@ -1343,9 +1368,20 @@
 
     // Disable Start until the socket handshake completes and we have a stable sid
     document.getElementById('btnStart').disabled = true;
+    let lastSid = null;
     socket.on('connect', () => {
       document.getElementById('btnStart').disabled = false;
-      setStatus('Ready');
+      if (lastSid && lastSid !== socket.id) {
+        // Reconnected: re-attach to the server-side session state
+        socket.emit('resume', { old_sid: lastSid }, (resp) => {
+          if (!(resp && resp.resumed) && sessionActive) {
+            showToast('Connection was lost too long. Stats restarted, keep talking.');
+          }
+        });
+        if (sessionActive) reconnectAudioWs();
+      }
+      lastSid = socket.id;
+      setStatus(sessionActive ? 'Streaming…' : 'Ready', sessionActive);
     });
     socket.on('disconnect', () => {
       document.getElementById('btnStart').disabled = true;
@@ -1375,6 +1411,19 @@
     });
 
     // ── UI helpers ─────────────────────────────────────────────────────────────
+    let toastTimer = null;
+    let lastToastAt = 0;
+    function showToast(msg) {
+      const now = Date.now();
+      if (now - lastToastAt < 5000) return; // rate-limit repeated failures
+      lastToastAt = now;
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.classList.remove('show'), 4000);
+    }
+
     function setStatus(text, active = false) {
       document.getElementById('statusText').textContent = text;
       document.getElementById('statusDot').classList.toggle('active', active);
@@ -1605,14 +1654,21 @@
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text }),
         });
-        if (!res.ok) { console.warn('[tts] /api/speak returned', res.status); return; }
+        if (!res.ok) {
+          console.warn('[tts] /api/speak returned', res.status);
+          showToast('Voice playback is unavailable right now. Text feedback still works.');
+          return;
+        }
         const arrayBuffer = await res.arrayBuffer();
         const decoded = await ttsCtx.decodeAudioData(arrayBuffer);
         const src = ttsCtx.createBufferSource();
         src.buffer = decoded;
         src.connect(ttsCtx.destination);
         src.start();
-      } catch (e) { console.warn('[tts] Audio playback failed:', e); }
+      } catch (e) {
+        console.warn('[tts] Audio playback failed:', e);
+        showToast('Voice playback is unavailable right now. Text feedback still works.');
+      }
     }
 
     // ── Audio capture ──────────────────────────────────────────────────────────
@@ -1643,12 +1699,29 @@
       source.connect(processorNode);
       processorNode.connect(audioContext.destination);
 
+      connectAudioWs();
+    }
+
+    function connectAudioWs() {
       const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
       audioWs = new WebSocket(`${wsProto}://${location.host}/ws/audio?sample_rate=${audioContext.sampleRate}&sid=${socket.id}`);
       audioWs.binaryType = 'arraybuffer';
       audioWs.onopen = () => setStatus('Streaming…', true);
-      audioWs.onclose = () => { if (sessionActive) setStatus('Reconnecting…'); };
+      audioWs.onclose = () => {
+        if (sessionActive) {
+          setStatus('Reconnecting…');
+          setTimeout(reconnectAudioWs, 1000);
+        }
+      };
       audioWs.onerror = (e) => console.error('[ws] Audio error:', e);
+    }
+
+    function reconnectAudioWs() {
+      // Mic graph stays alive; onaudioprocess no-ops while the WS is closed,
+      // so reopening the WS resumes streaming with no other work.
+      if (!sessionActive || !audioContext) return;
+      if (audioWs && (audioWs.readyState === WebSocket.OPEN || audioWs.readyState === WebSocket.CONNECTING)) return;
+      connectAudioWs();
     }
 
     function float32ToPcm16(float32Array) {
@@ -1902,13 +1975,17 @@
       document.getElementById('deliveryFlagsBlock').style.display =
         (reps.length || jargon.length || completionNeedsWork) ? 'block' : 'none';
 
-      document.getElementById('debriefSummary').textContent = data.summary || '';
+      const summaryEl = document.getElementById('debriefSummary');
+      summaryEl.textContent = data.summary || '';
+      summaryEl.classList.toggle('degraded', !!data.degraded);
 
-      // Spoken feedback — fall back to first improvement or summary if field is empty
-      const spokenText = data.spoken_feedback
+      // Spoken feedback — fall back to first improvement or summary if field is
+      // empty. Suppressed entirely for degraded reports (it would speak the
+      // outage notice aloud).
+      const spokenText = data.degraded ? '' : (data.spoken_feedback
         || (data.improvements && data.improvements[0])
         || data.summary
-        || '';
+        || '');
       const sfBar = document.getElementById('spokenFeedbackBar');
       if (spokenText) {
         document.getElementById('spokenFeedbackText').textContent = spokenText;
