@@ -14,7 +14,20 @@
       "Bash(git ls-tree *)",
       "Bash(pip show *)",
       "mcp__plugin_playwright_playwright__browser_snapshot",
-      "mcp__plugin_playwright_playwright__browser_console_messages"
+      "mcp__plugin_playwright_playwright__browser_console_messages",
+      "Bash(python -m pytest -q)",
+      "Bash(pkill -f \"uvicorn main:app\")",
+      "Bash(ls Dockerfile render.yaml fly.toml)",
+      "Bash(grep -rln \"background_agent\\\\|BACKGROUND_AGENT\\\\|:8001\\\\|8001\" README.md HANDOFF.md main.py)",
+      "Bash(python -m pytest tests/test_report_retry.py -q)",
+      "Bash(python -m pytest *)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git rm background_agent.py)",
+      "Bash(node --check *)",
+      "Bash(uvicorn main:app *)",
+      "Bash(python -m pytest tests/test_report_replay.py -q)",
+      "Bash(python -m pytest tests/test_session_resume.py -q)"
     ]
   }
 }

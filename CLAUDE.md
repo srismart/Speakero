@@ -17,13 +17,7 @@ a monetizable product.
 
 ## How to run
 
-# Terminal 1
-
 uvicorn main:app --port 8080
-
-# Terminal 2
-
-python background_agent.py
 
 # Browser: http://localhost:8080
 
@@ -52,8 +46,9 @@ python background_agent.py
 
 Goal: make Speakero multi-tenant and deployable as a single container.
 
-1. Delete background_agent.py — its logic already lives in main.py's coaching_loop.
-   Remove BACKGROUND_AGENT_URL references and the :8001 endpoints from README/HANDOFF.
+1. (done 2026-06-10) Delete background_agent.py — its logic already lives in main.py's
+   coaching_loop. Remove BACKGROUND_AGENT_URL references and the :8001 endpoints from
+   README/HANDOFF.
 2. Replace global `session` singleton with SESSIONS: dict[str, SessionState] keyed
    by socket.io sid. Update SessionState to be instantiated per connection.
 3. On socket connect, join a room named after sid. Change every sio.emit to

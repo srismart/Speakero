@@ -29,9 +29,9 @@ It captures mic audio, detects filler words live, sends Claude-powered coaching 
 | `render.yaml` | ✅ Complete | Render.com deployment config (docker runtime, secrets via dashboard). |
 | `fly.toml` | ✅ Complete | Fly.io deployment config (sjc region, 512 MB shared VM, auto-stop). |
 | `.dockerignore` | ✅ Complete | Excludes `.env`, `.git`, `__pycache__`, `.claude`, `.playwright-mcp`. |
-| `background_agent.py` | ⚠️ Superseded | Original separate process on :8001. Functionality fully absorbed into `main.py`. Safe to delete. |
+| `background_agent.py` | ✅ Deleted (2026-06-10) | Original separate process on :8001. Functionality fully absorbed into `main.py`. |
 | `.env.example` | ✅ Complete | Template — do NOT commit `.env` with real keys. |
-| `README.md` | ⚠️ Stale | Still documents two-process setup. Needs update to reflect single-process architecture. |
+| `README.md` | ✅ Updated (2026-06-10) | Documents the single-process architecture. |
 
 ---
 
