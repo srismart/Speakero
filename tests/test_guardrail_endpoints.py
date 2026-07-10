@@ -101,3 +101,43 @@ def test_session_limit_timer_stops_session(monkeypatch):
         assert sess.active is False
     assert ("session_limit", "s-timer") in emitted
     main.SESSIONS.pop("s-timer", None)
+
+
+import limits  # noqa: E402
+
+
+def test_speak_requires_session_and_caps(monkeypatch):
+    async def fake_speak(text):
+        return b"RIFFfake"
+
+    monkeypatch.setattr(main, "speak", fake_speak)
+    monkeypatch.setattr(main.limits, "get_config",
+                        lambda: {**limits.DEFAULTS, "tts_calls_per_session": 2})
+    client = TestClient(main.fastapi_app)
+    # no sid -> 401
+    assert client.post("/api/speak", json={"text": "hi"}).status_code == 401
+    # unknown sid -> 401
+    assert client.post("/api/speak", json={"text": "hi", "sid": "nope"}).status_code == 401
+    _mk_session("s-tts")
+    assert client.post("/api/speak", json={"text": "hi", "sid": "s-tts"}).status_code == 200
+    assert client.post("/api/speak", json={"text": "hi", "sid": "s-tts"}).status_code == 200
+    assert client.post("/api/speak", json={"text": "hi", "sid": "s-tts"}).status_code == 429
+    main.SESSIONS.pop("s-tts", None)
+
+
+def test_report_memoized(monkeypatch):
+    calls = {"n": 0}
+
+    async def fake_report(*args, **kwargs):
+        calls["n"] += 1
+        return {"summary": "ok"}
+
+    monkeypatch.setattr(main, "generate_report", fake_report)
+    sess = _mk_session("s-memo")
+    sess.start()
+    client = TestClient(main.fastapi_app)
+    first = client.post("/api/report", json={"sid": "s-memo"}).json()
+    second = client.post("/api/report", json={"sid": "s-memo"}).json()
+    assert calls["n"] == 1
+    assert first == second
+    main.SESSIONS.pop("s-memo", None)

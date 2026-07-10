@@ -233,8 +233,19 @@ def _binding_check(request: Request, sess: SessionState):
 async def api_speak(request: Request):
     data = await request.json()
     text = data.get("text", "")
+    sid = data.get("sid", "")
     if not text:
         return Response(status_code=400)
+    sess = SESSIONS.get(sid)
+    if sess is None:
+        return JSONResponse({"error": "no active session"}, status_code=401)
+    _ctx, err = _binding_check(request, sess)
+    if err:
+        return err
+    cap = limits.get_config().get("tts_calls_per_session")
+    if cap is not None and sess.tts_calls >= cap:
+        return JSONResponse({"error": "tts limit reached for this session"}, status_code=429)
+    sess.tts_calls += 1
     try:
         audio_bytes = await speak(text)
         return Response(
@@ -262,6 +273,8 @@ async def api_report(request: Request):
     _ctx, err = _binding_check(request, sess)
     if err:
         return err
+    if sess.report_cache is not None:
+        return JSONResponse(sess.report_cache)
     transcript = sess.full_transcript()
     stats = sess.detector.get_stats()
     topic = data.get("topic", "")
@@ -280,6 +293,7 @@ async def api_report(request: Request):
         report["replay"] = sess.detector.get_replay_windows(
             roughest_index=report.pop("roughest_window_index", None)
         )
+        sess.report_cache = report
         return JSONResponse(report)
     except Exception as e:
         # Stats and replay windows are computed locally — never lose the session
