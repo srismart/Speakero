@@ -20,6 +20,18 @@ Spec C (after): Stripe Pro subscription gate.
    via supabase-js in the frontend; FastAPI verifies the JWT locally.
 4. **Nudge model:** Haiku 4.5 (a 15-word nudge is a simple, speed-critical task;
    roughly 3x cheaper and faster). Debrief stays on Sonnet.
+5. **Limits philosophy (revised 2026-07-10):** hard session caps for EVERYONE as
+   runaway-resource protection (a mic left on cannot stream STT for hours).
+   Anonymous gets 1-2 tries. Signing in unlocks authenticated features (saves,
+   tracking), not extra minutes as the primary pitch. Pro unlocks additional
+   time (longer default cap plus a per-session override for keynote practice)
+   and pro features (voice clone).
+6. **Limits are live config, not code:** all limit values live in a Supabase
+   `app_config` table and are editable in Supabase Studio with no redeploy.
+   **Supabase Studio is the v1 admin console** (user management via its Auth
+   section, ops toggles via the table editor). A custom in-app admin dashboard
+   is deferred until there is traffic worth visualizing; the usage logging in
+   this spec is its future data feed.
 
 ## Tier limits (cost vs value-unlock analysis, 2026-07-10)
 
@@ -29,24 +41,32 @@ debrief ~$0.015-0.02; TTS is noise). Anonymous users therefore get the FULL
 experience, briefly: voice nudges included (voice is the demo; withholding it
 to save a tenth of a cent undersells the product).
 
+All values below are `app_config` defaults, tunable live in Supabase Studio.
+
 | | Anonymous | Signed-in Free | Pro (Spec C) |
 |---|---|---|---|
-| Session length | 5 min (auto-stop) | 15 min | 30 min |
-| Sessions | 2/day per IP + browser marker | 8/month (enforced in Spec B) | Unlimited, fair-use note |
+| Session hard cap (auto-stop) | 5 min | 15 min | 30 min default |
+| Per-session override | no | no | up to 60 min (keynote practice) |
+| Sessions per day | 2 per IP + browser marker | unlimited (config key exists, off) | unlimited (config key exists, off) |
 | Voice nudges | yes | yes | yes |
 | Debrief + real-audio replay | yes | yes | yes |
-| Saved history | no | yes (Spec B) | yes |
+| Saved history / tracking | no | yes (Spec B) | yes |
 | Voice clone "after" | no | no | yes |
 
-- The 5:00 auto-stop is the conversion moment ("Sign in to keep going").
+- Every session has a server-enforced cap regardless of tier: runaway-resource
+  protection first (STT streaming cost, ~11MB/min browser PCM), monetization
+  second. The absolute ceiling anywhere is the Pro override max (60).
+- The auto-stop is the conversion moment. Anonymous copy: "Sign in to save
+  this session and keep practicing." Free copy: "Upgrade for longer sessions."
 - Two anonymous sessions per day, not one: false starts (mic issues) are
   common, and a same-day retry is a hot lead. Worst-case abuser cost is about
   $0.15/day, which is ignorable.
-- The Free monthly cap needs per-user persistence, so it activates in Spec B.
-  In Spec A, signed-in users get the 15-minute length limit only.
+- Free/Pro daily count caps exist as config keys defaulted to unlimited, so a
+  cap can be turned on in Studio if invoices show abuse, with no deploy.
 - These numbers are estimates. Re-verify against real smallest.ai and Anthropic
-  invoices after a week of traffic and tune the caps; the structure (per-day
-  anonymous, per-month free, length tiers) is the durable decision.
+  invoices after a week of traffic and tune values in Studio; the structure
+  (hard caps for all, counts for anonymous, Pro time override) is the durable
+  decision.
 
 ## Architecture
 
@@ -64,8 +84,26 @@ FastAPI (main.py)
   Tier limits enforced server-side (length timer, anonymous day-counter)
 ```
 
-No Supabase server-side SDK is needed in Spec A: the backend only verifies
-JWTs. Supabase tables arrive in Spec B.
+No Supabase server-side SDK is needed in Spec A: the backend verifies JWTs
+locally and reads one `app_config` table via a single PostgREST GET (httpx,
+service-role key) with a 60s in-memory cache and env-var fallbacks when
+Supabase is unreachable. Full Supabase data access arrives in Spec B.
+
+### app_config table (created in Supabase Studio)
+
+Key/value rows, service-role read only. Default rows:
+
+| key | default |
+|---|---|
+| `max_session_minutes.anonymous` | 5 |
+| `max_session_minutes.free` | 15 |
+| `max_session_minutes.pro` | 30 |
+| `pro_override_max_minutes` | 60 |
+| `anon_sessions_per_day` | 2 |
+| `sessions_per_day.free` / `.pro` | null (unlimited) |
+| `tts_calls_per_session` | 30 |
+
+Editing a row changes live behavior within the cache TTL (60s), no deploy.
 
 ## Components
 
@@ -82,14 +120,20 @@ JWTs. Supabase tables arrive in Spec B.
 
 ### 2. `limits.py` (new)
 
-- Tier constants: `LIMITS = {"anonymous": {...}, "free": {...}, "pro": {...}}`
-  per the table above.
+- `get_config()` reads `app_config` (PostgREST GET, 60s TTL cache, env-var
+  fallbacks named like `LIMIT_MAX_SESSION_MINUTES_FREE`); the table above is
+  the schema.
+- `resolve_session_minutes(tier, requested_minutes) -> int`: returns the
+  tier's cap; for Pro, honors `requested_minutes` clamped to
+  `pro_override_max_minutes`. Non-Pro requests above their cap are clamped,
+  never errored (friendlier, nothing to exploit).
 - Anonymous day-counter: in-memory `{key: [timestamps]}` where key is both the
   client IP and a browser marker (localStorage UUID the frontend sends on
   /api/start); either tripping blocks. Entries older than 24h pruned.
   In-memory is acceptable for the single-process deployment; a restart resets
   counters (documented; Spec B can persist if abuse shows up).
-- `check_and_count(auth, ip, marker) -> allow | {error, reason}`.
+- `check_and_count(auth, ip, marker) -> allow | {error, reason}` (consults the
+  per-tier sessions-per-day config keys; free/pro default unlimited).
 
 ### 3. `main.py` changes
 
@@ -99,9 +143,10 @@ JWTs. Supabase tables arrive in Spec B.
   AuthContext, stamp `sess.user_id` / `sess.tier`.
 - `/api/start`: resolve AuthContext from the Authorization header; verify it
   matches the session's user (or both anonymous); run the anonymous
-  day-counter; schedule a **session length timer** (asyncio task) that fires
-  at the tier limit, performs the same teardown as /api/stop, and emits a
-  `session_limit` event to the room.
+  day-counter; accept optional `requested_minutes` (Pro override, clamped via
+  `resolve_session_minutes`); schedule a **session length timer** (asyncio
+  task) that fires at the resolved limit, performs the same teardown as
+  /api/stop, and emits a `session_limit` event to the room.
 - `/api/stop`, `/api/report`, `/api/speak`: same sid-user binding check.
   This closes the deferred "any client with a sid can drive another session"
   hole for signed-in users.
@@ -122,9 +167,12 @@ JWTs. Supabase tables arrive in Spec B.
 - Browser marker: `localStorage["speakero_marker"] = crypto.randomUUID()`
   (created once), sent with /api/start.
 - `session_limit` event: stop the local capture UI and show the conversion
-  moment (anonymous: "Sign in to keep going" with the sign-in modal;
-  free: "Upgrade for longer sessions" placeholder until Spec C).
-- Timer display counts down from the tier limit rather than up (small UX cue).
+  moment (anonymous: "Sign in to save this session and keep practicing" with
+  the sign-in modal; free: "Upgrade for longer sessions" placeholder until
+  Spec C).
+- Pro users get a session-length selector before start (default 30, up to the
+  override max) for long keynote rehearsals; hidden for other tiers.
+- Timer display counts down from the resolved limit rather than up.
 
 ### 5. LLM ops hardening (small items folded in)
 
@@ -165,8 +213,9 @@ JWTs. Supabase tables arrive in Spec B.
   reserving Claude for content-aware nudges. Biggest cost/latency lever
   (roughly halves nudge LLM calls) but changes coaching behavior, so it gets
   its own design pass.
-- Free 8/month enforcement (Spec B), Pro tier + Stripe (Spec C), voice-clone
-  consent binding to user identity (Increment 2, after Spec C).
+- Pro tier + Stripe (Spec C), voice-clone consent binding to user identity
+  (Increment 2, after Spec C), custom in-app admin dashboard (Supabase Studio
+  covers v1 admin needs).
 
 ## Error handling
 
@@ -184,7 +233,10 @@ JWTs. Supabase tables arrive in Spec B.
 
 - `auth.py`: valid/expired/forged/absent tokens (signed with a test secret);
   tier extraction with and without app_metadata.
-- `limits.py`: cap trips on IP, cap trips on marker, day-window pruning.
+- `limits.py`: cap trips on IP, cap trips on marker, day-window pruning;
+  config cache TTL and env fallback when the config fetch fails;
+  `resolve_session_minutes` clamping (free asking 60 gets 15, pro asking 60
+  gets 60, pro asking 90 gets 60).
 - Endpoints: sid-user binding (mismatched token 401s), anonymous 429 on third
   start, session_limit timer fires and tears down (short monkeypatched limit),
   /api/speak 401/429 gating, debrief memoization returns the same object.
