@@ -54,3 +54,49 @@ def test_resolve_session_minutes(monkeypatch):
     assert limits.resolve_session_minutes("pro", 90) == 60    # clamped to override max
     assert limits.resolve_session_minutes("pro", "45") == 45  # string ok
     assert limits.resolve_session_minutes("pro", "junk") == 30
+
+
+from auth import AuthContext  # noqa: E402
+
+
+def test_anonymous_cap_trips_on_ip(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    assert limits.check_and_count(None, "1.2.3.4", "m1") is None
+    assert limits.check_and_count(None, "1.2.3.4", "m2") is None
+    denied = limits.check_and_count(None, "1.2.3.4", "m3")
+    assert denied is not None and "Sign in" in denied["reason"]
+
+
+def test_anonymous_cap_trips_on_marker(monkeypatch):
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    assert limits.check_and_count(None, "1.1.1.1", "mk") is None
+    assert limits.check_and_count(None, "2.2.2.2", "mk") is None
+    assert limits.check_and_count(None, "3.3.3.3", "mk") is not None
+
+
+def test_signed_in_monthly_cap(monkeypatch):
+    ctx = AuthContext(user_id="u1", email="a@b.c", tier="free")
+    monkeypatch.setattr(limits, "_count_starts", lambda uid, window: 8)
+    monkeypatch.setattr(limits, "_record_start", lambda uid, tier: None)
+    denied = limits.check_and_count(ctx, "9.9.9.9", "mk9")
+    assert denied is not None and "Monthly" in denied["reason"]
+
+
+def test_signed_in_under_cap_records(monkeypatch):
+    ctx = AuthContext(user_id="u1", email="a@b.c", tier="free")
+    recorded = {}
+    monkeypatch.setattr(limits, "_count_starts", lambda uid, window: 0)
+    monkeypatch.setattr(limits, "_record_start", lambda uid, tier: recorded.update(uid=uid, tier=tier))
+    assert limits.check_and_count(ctx, "9.9.9.9", "mk9") is None
+    assert recorded == {"uid": "u1", "tier": "free"}
+
+
+def test_signed_in_count_failure_fails_open(monkeypatch):
+    ctx = AuthContext(user_id="u1", email="a@b.c", tier="free")
+
+    def boom(uid, window):
+        raise RuntimeError("down")
+
+    monkeypatch.setattr(limits, "_count_starts", boom)
+    monkeypatch.setattr(limits, "_record_start", lambda uid, tier: None)
+    assert limits.check_and_count(ctx, "9.9.9.9", "mk9") is None
