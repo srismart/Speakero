@@ -47,7 +47,8 @@ All values below are `app_config` defaults, tunable live in Supabase Studio.
 |---|---|---|---|
 | Session hard cap (auto-stop) | 5 min | 15 min | 30 min default |
 | Per-session override | no | no | up to 60 min (keynote practice) |
-| Sessions per day | 2 per IP + browser marker | unlimited (config key exists, off) | unlimited (config key exists, off) |
+| Sessions per day | 2 per IP + browser marker | config key, default unlimited | config key, default unlimited |
+| Sessions per month | n/a (daily cap covers it) | config key, default 8 | config key, default unlimited |
 | Voice nudges | yes | yes | yes |
 | Debrief + real-audio replay | yes | yes | yes |
 | Saved history / tracking | no | yes (Spec B) | yes |
@@ -61,8 +62,14 @@ All values below are `app_config` defaults, tunable live in Supabase Studio.
 - Two anonymous sessions per day, not one: false starts (mic issues) are
   common, and a same-day retry is a hot lead. Worst-case abuser cost is about
   $0.15/day, which is ignorable.
-- Free/Pro daily count caps exist as config keys defaulted to unlimited, so a
-  cap can be turned on in Studio if invoices show abuse, with no deploy.
+- Free/Pro count caps (daily and monthly) are live config parameters for cost
+  control: turn them to 0 during an incident, 25 for a promo, unlimited when
+  comfortable, all in Studio with no deploy. Free monthly defaults to 8.
+- Monthly counting requires persistence across restarts, so Spec A pulls one
+  small table forward from Spec B: `session_starts` (user_id, tier,
+  started_at), one row written per signed-in session start. Counting is a
+  PostgREST count query. If Supabase is unreachable, counting fails OPEN
+  (never block users because the config store is down; log a warning).
 - These numbers are estimates. Re-verify against real smallest.ai and Anthropic
   invoices after a week of traffic and tune values in Studio; the structure
   (hard caps for all, counts for anonymous, Pro time override) is the durable
@@ -101,9 +108,18 @@ Key/value rows, service-role read only. Default rows:
 | `pro_override_max_minutes` | 60 |
 | `anon_sessions_per_day` | 2 |
 | `sessions_per_day.free` / `.pro` | null (unlimited) |
+| `sessions_per_month.free` | 8 |
+| `sessions_per_month.pro` | null (unlimited) |
 | `tts_calls_per_session` | 30 |
 
 Editing a row changes live behavior within the cache TTL (60s), no deploy.
+
+### session_starts table (created in Supabase Studio, pulled forward from Spec B)
+
+`id (uuid, default gen_random_uuid()), user_id (uuid), tier (text),
+started_at (timestamptz, default now())`. Service-role access only. One row
+per signed-in session start; anonymous sessions are not recorded (no
+identity). Daily/monthly caps count rows for the user in the window.
 
 ## Components
 
@@ -132,8 +148,10 @@ Editing a row changes live behavior within the cache TTL (60s), no deploy.
   /api/start); either tripping blocks. Entries older than 24h pruned.
   In-memory is acceptable for the single-process deployment; a restart resets
   counters (documented; Spec B can persist if abuse shows up).
-- `check_and_count(auth, ip, marker) -> allow | {error, reason}` (consults the
-  per-tier sessions-per-day config keys; free/pro default unlimited).
+- `check_and_count(auth, ip, marker) -> allow | {error, reason}`:
+  anonymous consults the in-memory day-counter; signed-in consults
+  `session_starts` counts against the per-tier daily/monthly config keys and
+  inserts the new row on allow. Supabase errors fail open with a warning.
 
 ### 3. `main.py` changes
 
