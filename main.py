@@ -182,6 +182,8 @@ async def disconnect(sid):
         gone = SESSIONS.pop(sid, None)
         if gone and gone.coaching_task and not gone.coaching_task.done():
             gone.coaching_task.cancel()
+        if gone and gone.limit_task and not gone.limit_task.done():
+            gone.limit_task.cancel()
         print(f"[sio] Session {sid} cleaned up after grace period")
 
     sess.cleanup_task = asyncio.create_task(_cleanup())
@@ -296,6 +298,17 @@ async def api_report(request: Request):
         })
 
 
+def _log_session_usage(sess: SessionState, ended_by: str):
+    print(json.dumps({
+        "event": "session_usage",
+        "user_id": sess.user_id,
+        "tier": sess.tier,
+        "seconds": round(sess.elapsed_seconds(), 1),
+        "ended_by": ended_by,
+        **sess.usage,
+    }))
+
+
 @fastapi_app.post("/api/start")
 async def api_start(request: Request):
     data = {}
@@ -309,13 +322,46 @@ async def api_start(request: Request):
     sess = SESSIONS.get(sid)
     if sess is None:
         return JSONResponse({"error": "unknown session"}, status_code=404)
+    ctx, err = _binding_check(request, sess)
+    if err:
+        return err
+    if ctx:
+        # Authoritative identity stamp: signing in mid-connection upgrades the session
+        sess.user_id, sess.tier = ctx.user_id, ctx.tier
+
+    ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+          or (request.client.host if request.client else ""))
+    denied = limits.check_and_count(ctx, ip, data.get("marker", ""))
+    if denied:
+        return JSONResponse(denied, status_code=429)
+
+    minutes = limits.resolve_session_minutes(sess.tier, data.get("requested_minutes"))
+
     sess.start()
     sess.mode = mode
     sess.topic = topic
+    sess.tts_calls = 0
+    sess.report_cache = None
+    sess.usage = {"input_tokens": 0, "output_tokens": 0, "llm_calls": 0}
     if sess.coaching_task and not sess.coaching_task.done():
         sess.coaching_task.cancel()
     sess.coaching_task = asyncio.create_task(coaching_loop(sess))
-    return JSONResponse({"status": "started"})
+
+    if sess.limit_task and not sess.limit_task.done():
+        sess.limit_task.cancel()
+
+    async def _limit_stop():
+        await asyncio.sleep(minutes * 60)
+        if not sess.active:
+            return
+        sess.stop()
+        if sess.coaching_task and not sess.coaching_task.done():
+            sess.coaching_task.cancel()
+        _log_session_usage(sess, "limit")
+        await sio.emit("event", {"type": "session_limit", "tier": sess.tier}, room=sess.room)
+
+    sess.limit_task = asyncio.create_task(_limit_stop())
+    return JSONResponse({"status": "started", "max_minutes": minutes})
 
 
 @fastapi_app.post("/api/stop")
@@ -336,6 +382,10 @@ async def api_stop(request: Request):
     if sess.coaching_task and not sess.coaching_task.done():
         sess.coaching_task.cancel()
     sess.coaching_task = None
+    if sess.limit_task and not sess.limit_task.done():
+        sess.limit_task.cancel()
+    sess.limit_task = None
+    _log_session_usage(sess, "user")
     return JSONResponse({"status": "stopped"})
 
 
