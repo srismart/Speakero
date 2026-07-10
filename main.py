@@ -5,6 +5,8 @@ import time
 import uuid
 import httpx
 import websockets
+import anthropic
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, Response, JSONResponse
@@ -18,25 +20,29 @@ from report import generate_report
 load_dotenv()
 
 SMALLEST_API_KEY = os.getenv("SMALLEST_API_KEY", "")
-BACKGROUND_AGENT_URL = os.getenv("BACKGROUND_AGENT_URL", "http://localhost:8001")
+ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
-PULSE_WS_URL = "wss://api.smallest.ai/v1/pulse/stream"
+PULSE_WS_URL = "wss://api.smallest.ai/waves/v1/pulse/get_text"
+CHUNK_INTERVAL_SECONDS = 30
+GRACE_SECONDS = 90  # keep a disconnected session alive this long for reconnects
 
 sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
-fastapi_app = FastAPI(title="Speakero")
-
-fastapi_app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 class SessionState:
     def __init__(self):
         self.active = False
         self.detector = FillerDetector()
+        self._transcript_buffer: list[str] = []
+        self._buffer_lock: asyncio.Lock = asyncio.Lock()
+        self.coaching_task: asyncio.Task | None = None
         self.full_transcript_parts: list[str] = []
         self.start_time: float | None = None
         self.mode: str = "individual"
         self.topic: str = ""
         self.highlight_window: str = ""
+        self.room: str = ""
+        self.cleanup_task: asyncio.Task | None = None
 
     def start(self):
         self.active = True
@@ -44,6 +50,7 @@ class SessionState:
         self.full_transcript_parts = []
         self.start_time = time.time()
         self.highlight_window = ""
+        self._transcript_buffer.clear()
 
     def stop(self):
         self.active = False
@@ -59,17 +66,130 @@ class SessionState:
         return (time.time() - self.start_time) if self.start_time else 0.0
 
 
-session = SessionState()
+SESSIONS: dict[str, SessionState] = {}
+
+
+async def _get_nudge_from_claude(transcript_snippet: str, sess: SessionState) -> str:
+    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+
+    if sess.mode == "panel":
+        mode_instruction = (
+            "This is a PANEL interview or Q&A. Focus on: conciseness (flag if the answer is too long), "
+            "direct responsiveness to questions, and avoiding rambling. "
+            "If the answer seems too long or loses focus, nudge the speaker to be more concise."
+        )
+    elif sess.mode == "pitch":
+        mode_instruction = (
+            "This is a PITCH presentation. Focus on: persuasiveness, hook quality, "
+            "and whether there is a clear call-to-action. "
+            "Nudge the speaker toward stronger value propositions or a clearer ask."
+        )
+    else:
+        mode_instruction = (
+            "This is an individual talk or presentation. Focus on: narrative flow, "
+            "smooth transitions between points, and building toward a clear conclusion."
+        )
+
+    topic_instruction = ""
+    if sess.topic:
+        topic_instruction = (
+            f"\n\nThe speaker's stated topic is: \"{sess.topic}\". "
+            "If the snippet seems to drift off-topic or lose relevance to this topic, "
+            "make the nudge about getting back on track with the topic."
+        )
+
+    message = await client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=64,
+        messages=[
+            {
+                "role": "user",
+                "content": (
+                    f"You are a speaking coach. {mode_instruction}{topic_instruction}\n\n"
+                    "Based on this transcript snippet, write ONE short nudge (max 15 words) for the speaker. "
+                    "Return only the nudge text, no quotes, no explanation.\n\n"
+                    f"Transcript:\n{transcript_snippet}"
+                ),
+            }
+        ],
+    )
+    return message.content[0].text.strip()
+
+
+async def coaching_loop(sess: SessionState):
+    print(f"[agent] Coaching loop started for {sess.room}")
+    while True:
+        await asyncio.sleep(CHUNK_INTERVAL_SECONDS)
+
+        async with sess._buffer_lock:
+            if not sess._transcript_buffer:
+                continue
+            snippet = " ".join(sess._transcript_buffer)
+            sess._transcript_buffer.clear()
+
+        if not snippet.strip():
+            continue
+
+        print(f"[agent] Generating nudge for {sess.room} ({len(snippet)} chars)…")
+        try:
+            nudge = await _get_nudge_from_claude(snippet, sess)
+            print(f"[agent] Nudge: {nudge}")
+            await sio.emit("event", {"type": "nudge", "text": nudge}, room=sess.room)
+        except Exception as e:
+            print(f"[agent] Error generating nudge: {e}")
+
+
+@asynccontextmanager
+async def lifespan(app):
+    yield
+
+
+fastapi_app = FastAPI(title="Speakero", lifespan=lifespan)
+
+fastapi_app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @sio.event
 async def connect(sid, environ):
+    sess = SessionState()
+    sess.room = sid
+    SESSIONS[sid] = sess
+    await sio.enter_room(sid, sid)
     print(f"[sio] Client connected: {sid}")
 
 
 @sio.event
 async def disconnect(sid):
-    print(f"[sio] Client disconnected: {sid}")
+    sess = SESSIONS.get(sid)
+    if sess is None:
+        return
+    print(f"[sio] Client disconnected: {sid} — {GRACE_SECONDS}s grace before cleanup")
+
+    async def _cleanup():
+        await asyncio.sleep(GRACE_SECONDS)
+        gone = SESSIONS.pop(sid, None)
+        if gone and gone.coaching_task and not gone.coaching_task.done():
+            gone.coaching_task.cancel()
+        print(f"[sio] Session {sid} cleaned up after grace period")
+
+    sess.cleanup_task = asyncio.create_task(_cleanup())
+
+
+@sio.event
+async def resume(sid, data):
+    """Re-attach a reconnected client (new sid) to its pre-disconnect session."""
+    old_sid = (data or {}).get("old_sid", "")
+    old_sess = SESSIONS.get(old_sid)
+    if old_sess is None or old_sid == sid:
+        return {"resumed": False}
+    if old_sess.cleanup_task and not old_sess.cleanup_task.done():
+        old_sess.cleanup_task.cancel()
+    old_sess.cleanup_task = None
+    old_sess.room = sid
+    SESSIONS[sid] = old_sess
+    del SESSIONS[old_sid]
+    print(f"[sio] Session resumed: {old_sid} -> {sid}")
+    return {"resumed": True}
 
 
 @fastapi_app.get("/")
@@ -97,17 +217,22 @@ async def api_speak(request: Request):
 
 @fastapi_app.post("/api/report")
 async def api_report(request: Request):
-    transcript = session.full_transcript()
-    stats = session.detector.get_stats()
     data = {}
     if request.headers.get("content-type", "").startswith("application/json"):
         try:
             data = await request.json()
         except Exception:
             pass
+    sid = data.get("sid", "")
+    sess = SESSIONS.get(sid)
+    if sess is None:
+        return JSONResponse({"error": "unknown session"}, status_code=404)
+    transcript = sess.full_transcript()
+    stats = sess.detector.get_stats()
     topic = data.get("topic", "")
-    mode = getattr(session, "mode", "individual")
-    highlight_window = session.detector.get_best_window()
+    mode = sess.mode
+    best_window = sess.detector.get_best_window()
+    highlight_window = best_window["text"] if best_window else ""
     try:
         report = await generate_report(
             transcript,
@@ -115,21 +240,27 @@ async def api_report(request: Request):
             topic=topic,
             mode=mode,
             highlight_window=highlight_window,
+            candidate_windows=sess.detector.get_replay_candidates(),
+        )
+        report["replay"] = sess.detector.get_replay_windows(
+            roughest_index=report.pop("roughest_window_index", None)
         )
         return JSONResponse(report)
     except Exception as e:
-        print(f"[report] Error: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
-
-
-@fastapi_app.post("/nudge")
-async def receive_nudge(request: Request):
-    data = await request.json()
-    nudge_text = data.get("text", "").strip()
-    if nudge_text:
-        await sio.emit("event", {"type": "nudge", "text": nudge_text})
-        print(f"[nudge] Emitted: {nudge_text}")
-    return JSONResponse({"status": "ok"})
+        # Stats and replay windows are computed locally — never lose the session
+        # just because the AI analysis failed.
+        print(f"[report] Error: {e} — returning degraded report")
+        return JSONResponse({
+            "degraded": True,
+            "summary": "AI analysis is temporarily unavailable. Your session stats and replay are below.",
+            "topic_identified": "",
+            "strengths": [],
+            "improvements": [],
+            "content_feedback": [],
+            "filler_breakdown": stats.get("fillerBreakdown", {}),
+            "transcript": transcript,
+            "replay": sess.detector.get_replay_windows(),
+        })
 
 
 @fastapi_app.post("/api/start")
@@ -139,27 +270,36 @@ async def api_start(request: Request):
         data = await request.json()
     except Exception:
         pass
+    sid = data.get("sid", "")
     mode = data.get("mode", "individual")
     topic = data.get("topic", "")
-    session.start()
-    session.mode = mode
-    session.topic = topic
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            await client.post(f"{BACKGROUND_AGENT_URL}/start", json={"mode": mode, "topic": topic})
-    except Exception:
-        pass
+    sess = SESSIONS.get(sid)
+    if sess is None:
+        return JSONResponse({"error": "unknown session"}, status_code=404)
+    sess.start()
+    sess.mode = mode
+    sess.topic = topic
+    if sess.coaching_task and not sess.coaching_task.done():
+        sess.coaching_task.cancel()
+    sess.coaching_task = asyncio.create_task(coaching_loop(sess))
     return JSONResponse({"status": "started"})
 
 
 @fastapi_app.post("/api/stop")
-async def api_stop():
-    session.stop()
+async def api_stop(request: Request):
+    data = {}
     try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            await client.post(f"{BACKGROUND_AGENT_URL}/stop")
+        data = await request.json()
     except Exception:
         pass
+    sid = data.get("sid", "")
+    sess = SESSIONS.get(sid)
+    if sess is None:
+        return JSONResponse({"error": "unknown session"}, status_code=404)
+    sess.stop()
+    if sess.coaching_task and not sess.coaching_task.done():
+        sess.coaching_task.cancel()
+    sess.coaching_task = None
     return JSONResponse({"status": "stopped"})
 
 
@@ -167,36 +307,42 @@ async def api_stop():
 async def audio_ws(websocket: WebSocket):
     await websocket.accept()
     sample_rate = websocket.query_params.get("sample_rate", "48000")
-    print(f"[ws] Browser audio WebSocket connected (sample_rate={sample_rate})")
+    sid = websocket.query_params.get("sid", "")
+    sess = SESSIONS.get(sid)
+    if sess is None:
+        await websocket.close(code=4004)
+        return
+    print(f"[ws] Browser audio WebSocket connected (sid={sid}, sample_rate={sample_rate})")
 
     pulse_url = (
         f"{PULSE_WS_URL}"
-        f"?api_key={SMALLEST_API_KEY}"
-        f"&sample_rate={sample_rate}"
+        f"?sample_rate={sample_rate}"
         f"&encoding=linear16"
-        f"&language=en-US"
-        f"&channels=1"
+        f"&language=en"
+        f"&word_timestamps=true"
     )
 
     try:
         async with websockets.connect(
             pulse_url,
-            extra_headers={"Authorization": f"Bearer {SMALLEST_API_KEY}"},
+            additional_headers={"Authorization": f"Bearer {SMALLEST_API_KEY}"},
             ping_interval=20,
             ping_timeout=30,
         ) as pulse_ws:
-            await _bridge_audio(websocket, pulse_ws)
+            await _bridge_audio(websocket, pulse_ws, sess, sid)
     except websockets.exceptions.InvalidURI:
         print("[ws] WARNING: Could not connect to Pulse STT — running in offline mode")
-        await _offline_mode(websocket)
+        await _offline_mode(websocket, sess, sid)
     except Exception as e:
-        print(f"[ws] Pulse connection error: {e}")
-        await _offline_mode(websocket)
+        print(f"[ws] Pulse connection error: {type(e).__name__}: {e}")
+        print(f"[ws] Pulse URL was: {pulse_url}")
+        print(f"[ws] API key present: {bool(SMALLEST_API_KEY)}, len={len(SMALLEST_API_KEY)}")
+        await _offline_mode(websocket, sess, sid)
     finally:
         print("[ws] Audio WebSocket closed")
 
 
-async def _bridge_audio(browser_ws: WebSocket, pulse_ws):
+async def _bridge_audio(browser_ws: WebSocket, pulse_ws, sess: SessionState, sid: str):
     async def forward_browser_to_pulse():
         try:
             while True:
@@ -210,7 +356,7 @@ async def _bridge_audio(browser_ws: WebSocket, pulse_ws):
     async def forward_pulse_to_frontend():
         try:
             async for raw_msg in pulse_ws:
-                await _handle_pulse_message(raw_msg)
+                await _handle_pulse_message(raw_msg, sess, sid)
         except Exception as e:
             print(f"[ws] Pulse→frontend error: {e}")
 
@@ -220,7 +366,7 @@ async def _bridge_audio(browser_ws: WebSocket, pulse_ws):
     )
 
 
-async def _handle_pulse_message(raw_msg: str | bytes):
+async def _handle_pulse_message(raw_msg: str | bytes, sess: SessionState, sid: str):
     try:
         if isinstance(raw_msg, bytes):
             raw_msg = raw_msg.decode("utf-8")
@@ -237,55 +383,49 @@ async def _handle_pulse_message(raw_msg: str | bytes):
 
     if words:
         print(f"[pulse] words: {[w.get('word') for w in words]}")
-        result = session.detector.process_words(words)
+        result = sess.detector.process_words(words)
         new_fillers = result["new_fillers"]
         stats = result["stats"]
 
         text_from_words = " ".join(w.get("word", "") for w in words)
-        session.add_text(text_from_words)
+        sess.add_text(text_from_words)
 
-        await sio.emit("event", {"type": "transcript", "text": text_from_words, "is_final": is_final})
-        await sio.emit("event", {"type": "stats", **stats})
+        await sio.emit("event", {"type": "transcript", "text": text_from_words, "is_final": is_final}, room=sid)
+        await sio.emit("event", {"type": "stats", **stats}, room=sid)
 
         if new_fillers:
-            await sio.emit("event", {"type": "filler_detected", "words": new_fillers})
+            await sio.emit("event", {"type": "filler_detected", "words": new_fillers}, room=sid)
 
         if result.get("streak"):
-            await sio.emit("event", {"type": "filler_streak"})
+            await sio.emit("event", {"type": "filler_streak"}, room=sid)
 
         if is_final and text_from_words.strip():
-            asyncio.create_task(_forward_chunk_to_agent(text_from_words))
+            async with sess._buffer_lock:
+                sess._transcript_buffer.append(text_from_words)
 
     elif transcript_text:
-        dummy_words = [
-            {"word": w, "start": 0.0, "end": 0.0}
-            for w in transcript_text.split()
-            if w.strip()
-        ]
-        if dummy_words:
-            result = session.detector.process_words(dummy_words)
-            new_fillers = result["new_fillers"]
-            stats = result["stats"]
-            session.add_text(transcript_text)
-            await sio.emit("event", {"type": "transcript", "text": transcript_text, "is_final": is_final})
-            await sio.emit("event", {"type": "stats", **stats})
-            if new_fillers:
-                await sio.emit("event", {"type": "filler_detected", "words": new_fillers})
-            if result.get("streak"):
-                await sio.emit("event", {"type": "filler_streak"})
-        if is_final and transcript_text.strip():
-            asyncio.create_task(_forward_chunk_to_agent(transcript_text))
+        if is_final:
+            dummy_words = [
+                {"word": w, "start": 0.0, "end": 0.0}
+                for w in transcript_text.split()
+                if w.strip()
+            ]
+            if dummy_words:
+                result = sess.detector.process_words(dummy_words)
+                new_fillers = result["new_fillers"]
+                stats = result["stats"]
+                sess.add_text(transcript_text)
+                await sio.emit("event", {"type": "stats", **stats}, room=sid)
+                if new_fillers:
+                    await sio.emit("event", {"type": "filler_detected", "words": new_fillers}, room=sid)
+                if result.get("streak"):
+                    await sio.emit("event", {"type": "filler_streak"}, room=sid)
+            async with sess._buffer_lock:
+                sess._transcript_buffer.append(transcript_text)
+        await sio.emit("event", {"type": "transcript", "text": transcript_text, "is_final": is_final}, room=sid)
 
 
-async def _forward_chunk_to_agent(text: str):
-    try:
-        async with httpx.AsyncClient(timeout=3.0) as client:
-            await client.post(f"{BACKGROUND_AGENT_URL}/chunk", json={"text": text})
-    except Exception:
-        pass
-
-
-async def _offline_mode(websocket: WebSocket):
+async def _offline_mode(websocket: WebSocket, sess: SessionState, sid: str):
     counter = 0
     mock_words = [
         "So", "um", "the", "main", "point", "I", "wanted", "to", "make",
@@ -297,16 +437,18 @@ async def _offline_mode(websocket: WebSocket):
             await websocket.receive_bytes()
             counter += 1
             if counter % 20 == 0:
-                word_obj = [{"word": mock_words[counter // 20 % len(mock_words)], "start": float(counter), "end": float(counter) + 0.4}]
-                result = session.detector.process_words(word_obj)
+                # No real word timestamps in offline mode — keep them zeroed so the
+                # replay windows stay gated out and the debrief replay card stays hidden.
+                word_obj = [{"word": mock_words[counter // 20 % len(mock_words)], "start": 0.0, "end": 0.0}]
+                result = sess.detector.process_words(word_obj)
                 text = word_obj[0]["word"]
-                session.add_text(text)
-                await sio.emit("event", {"type": "transcript", "text": text, "is_final": True})
-                await sio.emit("event", {"type": "stats", **result["stats"]})
+                sess.add_text(text)
+                await sio.emit("event", {"type": "transcript", "text": text, "is_final": True}, room=sid)
+                await sio.emit("event", {"type": "stats", **result["stats"]}, room=sid)
                 if result["new_fillers"]:
-                    await sio.emit("event", {"type": "filler_detected", "words": result["new_fillers"]})
+                    await sio.emit("event", {"type": "filler_detected", "words": result["new_fillers"]}, room=sid)
                 if result.get("streak"):
-                    await sio.emit("event", {"type": "filler_streak"})
+                    await sio.emit("event", {"type": "filler_streak"}, room=sid)
     except WebSocketDisconnect:
         pass
 

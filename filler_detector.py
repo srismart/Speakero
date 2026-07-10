@@ -89,11 +89,15 @@ class FillerDetector:
         # Record this chunk for highlight reel
         chunk_text = " ".join(chunk_words)
         if chunk_text.strip() or chunk_fillers:
+            starts = [w.get("start", 0.0) for w in words]
+            ends = [w.get("end", w.get("start", 0.0)) for w in words]
             self._word_windows.append({
                 "text": chunk_text,
                 "t": chunk_t,
                 "fillers": list(chunk_fillers),
                 "words": list(chunk_words),
+                "audio_start": min(starts) if starts else 0.0,
+                "audio_end": max(ends) if ends else 0.0,
             })
 
         # Streak detection: count fillers in the last STREAK_WINDOW_SECONDS
@@ -121,19 +125,93 @@ class FillerDetector:
     def get_transcript(self) -> str:
         return " ".join(self._transcript_words)
 
-    def get_best_window(self) -> str:
-        """Return the chunk with the best delivery: most words, fewest fillers ratio."""
+    def get_best_window(self) -> dict | None:
+        """Return the best-delivery window: most words, lowest filler ratio.
+
+        Returns {"text", "start", "end"} or None if no windows recorded.
+        """
         if not self._word_windows:
-            return ""
+            return None
 
         def score(w: dict) -> float:
             word_count = len(w["words"])
             filler_count = len(w["fillers"])
             if word_count == 0:
                 return -1.0
-            # Higher word count and lower filler ratio is better
             filler_ratio = filler_count / (word_count + filler_count)
             return word_count * (1.0 - filler_ratio)
 
         best = max(self._word_windows, key=score)
-        return best["text"]
+        if len(best["words"]) == 0:
+            # Only all-filler windows exist — none is a real "best" delivery.
+            return None
+        return {"text": best["text"], "start": best["audio_start"], "end": best["audio_end"]}
+
+    def get_worst_window(self) -> dict | None:
+        """Return the roughest window: highest filler density.
+
+        Requires at least 4 tokens (words + fillers) so trivial stumbles do not
+        win, and at least one filler to be a meaningful "worst". Returns
+        {"text", "start", "end"} or None.
+        """
+        eligible = [
+            w for w in self._word_windows
+            if (len(w["words"]) + len(w["fillers"])) >= 4 and len(w["fillers"]) > 0
+        ]
+        if not eligible:
+            return None
+
+        def density(w: dict) -> float:
+            total = len(w["words"]) + len(w["fillers"])
+            return len(w["fillers"]) / total if total else 0.0
+
+        worst = max(eligible, key=density)
+        return {"text": worst["text"], "start": worst["audio_start"], "end": worst["audio_end"]}
+
+    def get_replay_candidates(self) -> List[dict]:
+        """Indexed list of replay-eligible windows (real audio span + has words),
+        for Claude to choose the roughest from. Capped to bound prompt size."""
+        cands = [
+            {"index": i, "text": w["text"]}
+            for i, w in enumerate(self._word_windows)
+            if w["audio_end"] > w["audio_start"] and len(w["words"]) > 0
+        ]
+        return cands[:25]
+
+    def get_window_by_index(self, index: Optional[int]) -> dict | None:
+        """Resolve a window index (into the recorded windows) to a replay span,
+        or None if the index is out of range or the window has no real audio."""
+        if index is None or not (0 <= index < len(self._word_windows)):
+            return None
+        w = self._word_windows[index]
+        if w["audio_end"] <= w["audio_start"] or len(w["words"]) == 0:
+            return None
+        return {"text": w["text"], "start": w["audio_start"], "end": w["audio_end"]}
+
+    def get_replay_windows(self, roughest_index: Optional[int] = None) -> dict:
+        """Return {"best": window|None, "worst": window|None} for audio replay.
+
+        Each window is {"text", "start", "end"}. A window is only returned when it
+        has a real audio span (end > start). If best and worst are the same span,
+        worst is dropped.
+
+        When `roughest_index` is given (Claude's pick), that window becomes the
+        "worst"; if it can't be resolved, we fall back to the filler-density
+        heuristic.
+        """
+        def valid(w: dict | None) -> bool:
+            return w is not None and w["end"] > w["start"]
+
+        best = self.get_best_window()
+        best = best if valid(best) else None
+
+        if roughest_index is not None:
+            worst = self.get_window_by_index(roughest_index) or self.get_worst_window()
+        else:
+            worst = self.get_worst_window()
+        worst = worst if valid(worst) else None
+
+        if best and worst and best["start"] == worst["start"] and best["end"] == worst["end"]:
+            worst = None
+
+        return {"best": best, "worst": worst}

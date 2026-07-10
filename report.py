@@ -10,6 +10,7 @@ async def generate_report(
     topic: str = "",
     mode: str = "individual",
     highlight_window: str = "",
+    candidate_windows: list | None = None,
 ) -> Dict[str, Any]:
     api_key = os.getenv("ANTHROPIC_API_KEY")
     if not api_key:
@@ -63,6 +64,24 @@ async def generate_report(
     else:
         highlight_section = "\n(No highlight window available — set 'highlight_moment' to empty string.)"
 
+    # Roughest-moment selection: let Claude choose which window had the worst delivery
+    # (rambling, abandoned thoughts, fillers, awkward pauses) from a numbered candidate
+    # list, returned as an index. Folded into this same call to avoid an extra request.
+    if candidate_windows:
+        window_lines = "\n".join(f'{c["index"]}: {c["text"]}' for c in candidate_windows)
+        roughest_section = (
+            "\nCANDIDATE WINDOWS (numbered segments of the talk):\n"
+            f"{window_lines}\n"
+            "From the numbered list above, pick the index of the window with the ROUGHEST "
+            "delivery — most rambling, abandoned thoughts, awkward pauses, or filler. "
+            "Return that integer as 'roughest_window_index'. If none clearly stands out, "
+            "pick the most filler-heavy one. If the list is empty, use -1."
+        )
+        roughest_key = '  "roughest_window_index": <integer index from the candidate list above, or -1 if none>,\n'
+    else:
+        roughest_section = ""
+        roughest_key = ""
+
     prompt = f"""You are an expert speaking coach. Analyze this practice session transcript and stats.
 
 {topic_line}
@@ -81,17 +100,18 @@ SESSION STATS:
 
 {mode_instruction}
 {highlight_section}
+{roughest_section}
 
 Return ONLY a valid JSON object (no markdown, no code fences) with exactly these keys:
 {{
-  "topic_identified": "the topic you identified or confirmed",
+{roughest_key}  "topic_identified": "the topic you identified or confirmed",
   "strengths": ["string", "string"],
   "improvements": ["string", "string", "string"],
   "content_feedback": ["string", "string", "string"],
   "filler_breakdown": {{"word": count}},
   "summary": "one paragraph overall assessment",
-  "spoken_feedback": "the single most important coaching point in 1 natural spoken sentence (max 20 words)",
-  "example_extract": "a short rewritten example (1-2 sentences) showing improved delivery of a specific moment from the transcript — make it natural and speakable aloud",
+  "spoken_feedback": "REQUIRED — the single most important coaching point as 1 natural spoken sentence (max 20 words). Must never be empty.",
+  "example_extract": "REQUIRED — rewrite 1-2 sentences from the transcript showing how they could be delivered better. Must be natural and speakable aloud. Never empty.",
   "repetition_flags": ["up to 3 phrases repeated too often — empty list if none"],
   "jargon_flags": ["up to 3 overly technical phrases that may confuse a general audience — empty list if none"],
   "sentence_completion_rate": "Claude's assessment as a string like 'Good — most sentences were completed' or 'Needs work — several abandoned thoughts detected'",
@@ -101,18 +121,39 @@ Return ONLY a valid JSON object (no markdown, no code fences) with exactly these
 Be specific, actionable, and encouraging. Base your analysis strictly on the data provided.
 For repetition_flags and jargon_flags: return actual empty arrays [] if there are no issues, not arrays with placeholder strings."""
 
-    message = await client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=2000,
-        messages=[{"role": "user", "content": prompt}],
-    )
+    report = None
+    parse_error: Exception | None = None
+    for _attempt in range(2):
+        message = await client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=2000,
+            messages=[{"role": "user", "content": prompt}],
+        )
 
-    raw = message.content[0].text.strip()
+        raw = message.content[0].text.strip()
 
-    if raw.startswith("```"):
-        raw = raw.split("```")[1]
-        if raw.startswith("json"):
-            raw = raw[4:]
-        raw = raw.strip()
+        if raw.startswith("```"):
+            raw = raw.split("```")[1]
+            if raw.startswith("json"):
+                raw = raw[4:]
+            raw = raw.strip()
 
-    return json.loads(raw)
+        try:
+            report = json.loads(raw)
+            break
+        except json.JSONDecodeError as e:
+            parse_error = e
+
+    if report is None:
+        raise parse_error
+
+    # Normalize Claude's roughest pick to a usable index or None (it may be
+    # missing, -1, or a string). Callers pass it to get_replay_windows().
+    idx = report.get("roughest_window_index")
+    try:
+        idx = int(idx)
+    except (TypeError, ValueError):
+        idx = None
+    report["roughest_window_index"] = idx if idx is not None and idx >= 0 else None
+
+    return report

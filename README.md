@@ -40,9 +40,9 @@ Browser (index.html)
   │  socket.io events ← transcript, stats, filler_detected, filler_streak, nudge
   │
   ▼
-main.py  (:8000)  FastAPI + python-socketio
+main.py  (:8080)  FastAPI + python-socketio
   │
-  ├──► smallest.ai Pulse STT  (cloud WebSocket, wss://api.smallest.ai/v1/pulse/stream)
+  ├──► smallest.ai Pulse STT  (cloud WebSocket, wss://api.smallest.ai/waves/v1/pulse/get_text)
   │      └─ word timestamps ──► filler_detector.py
   │              ├─ filler words / phrases detected
   │              ├─ pause gaps (>2s)
@@ -50,10 +50,9 @@ main.py  (:8000)  FastAPI + python-socketio
   │              ├─ WPM calculation
   │              └─ best-window tracking (for highlight reel)
   │
-  ├──► background_agent.py  (:8001)  separate process
-  │      └─ receives transcript chunks via POST /chunk
-  │         accumulates 30s → Claude Sonnet (mode-aware prompt)
-  │         POST /nudge → main.py → socket.io → browser → TTS
+  ├──► coaching loop (in-process, one task per session)
+  │      └─ accumulates 30s of transcript → Claude Sonnet (mode-aware prompt)
+  │         → socket.io nudge → browser → TTS
   │
   ├──► tts.py
   │      └─ POST /api/speak → smallest.ai Lightning TTS → WAV bytes → Web Audio API
@@ -91,13 +90,10 @@ pip install -r requirements.txt
 cp .env.example .env
 # Fill in SMALLEST_API_KEY and ANTHROPIC_API_KEY
 
-# 4. Start the main server
-uvicorn main:app --reload
+# 4. Start the server
+uvicorn main:app --port 8080
 
-# 5. In a second terminal, start the background agent
-python background_agent.py
-
-# Open http://localhost:8000
+# Open http://localhost:8080
 ```
 
 ---
@@ -108,8 +104,6 @@ python background_agent.py
 |---|---|
 | `SMALLEST_API_KEY` | [smallest.ai](https://smallest.ai) API key — used for Pulse STT and Lightning TTS |
 | `ANTHROPIC_API_KEY` | [Anthropic](https://console.anthropic.com) API key — used for Claude Sonnet |
-| `MAIN_SERVER_URL` | URL of main.py, seen by background agent (default: `http://localhost:8000`) |
-| `BACKGROUND_AGENT_URL` | URL of background_agent.py, seen by main.py (default: `http://localhost:8001`) |
 
 ---
 

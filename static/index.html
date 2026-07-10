@@ -466,7 +466,6 @@
 
     /* ── TRANSCRIPT PANEL ────────────────────────────────────────────────────── */
     .transcript-card {
-      min-height: 320px;
       display: flex;
       flex-direction: column;
       padding: 20px;
@@ -519,7 +518,9 @@
     }
 
     #transcript {
-      height: 260px;
+      min-height: 80px;
+      max-height: 380px;
+      height: auto;
       overflow-y: auto;
       font-family: 'JetBrains Mono', monospace;
       font-size: 0.88rem;
@@ -707,12 +708,40 @@
     /* ── DEBRIEF SECTION ─────────────────────────────────────────────────────── */
     #debriefSection {
       display: none;
-      margin-top: 16px;
+      position: fixed;
+      inset: 0;
+      z-index: 500;
+      background: rgba(2,6,23,0.85);
+      backdrop-filter: blur(8px);
+      overflow-y: auto;
+      padding: 80px 24px 120px;
     }
 
+    #debriefSection.open { display: block; }
+
     .debrief-card {
+      max-width: 860px;
+      margin: 0 auto;
       padding: 28px;
+      position: relative;
     }
+
+    #btnCloseDebrief {
+      position: sticky;
+      top: 0;
+      float: right;
+      margin-bottom: 8px;
+      background: rgba(51,65,85,0.7);
+      border: 1px solid rgba(71,85,105,0.5);
+      color: var(--text);
+      border-radius: 8px;
+      padding: 6px 16px;
+      font-size: 0.82rem;
+      font-family: 'Inter', sans-serif;
+      cursor: pointer;
+      z-index: 10;
+    }
+    #btnCloseDebrief:hover { background: rgba(71,85,105,0.8); }
 
     .debrief-title-row {
       display: flex;
@@ -918,23 +947,112 @@
     .btn-hear:active { transform: scale(0.97); }
 
     #debriefSummary {
-      font-size: 0.9rem;
+      font-size: 0.92rem;
       font-family: 'Inter', sans-serif;
       line-height: 1.7;
       color: var(--slate-400);
-      border-top: 1px solid rgba(51,65,85,0.4);
-      padding-top: 16px;
-      margin-top: 4px;
+      margin: 4px 0 18px;
     }
+    #debriefSummary:empty { display: none; }
+
+    /* Your Moments card — merged highlight + replay + example */
+    .moments-box {
+      background: rgba(16,185,129,0.06);
+      border: 1px solid rgba(16,185,129,0.25);
+      border-radius: 12px;
+      padding: 16px 20px;
+      margin-bottom: 16px;
+    }
+    .moments-box .mo-label {
+      font-size: 0.68rem;
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--emerald);
+      margin-bottom: 4px;
+    }
+    .moment { padding: 12px 0; }
+    .moment + .moment { border-top: 1px solid rgba(51,65,85,0.4); }
+    .moment-note {
+      font-size: 0.88rem;
+      line-height: 1.6;
+      color: var(--slate-400);
+      font-family: 'Inter', sans-serif;
+      margin-top: 8px;
+    }
+    .moment-note:empty { display: none; }
+    .btn-best { background: var(--emerald); }
+    .btn-rough { background: var(--warn); }
+    .moment-fix {
+      margin-top: 12px;
+      background: rgba(6,182,212,0.07);
+      border: 1px solid rgba(6,182,212,0.25);
+      border-radius: 10px;
+      padding: 12px 14px;
+    }
+    .moment-fix .fix-label {
+      font-size: 0.68rem;
+      font-family: 'Inter', sans-serif;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.5px;
+      color: var(--cyan);
+      margin-bottom: 8px;
+    }
+    .moment-fix #exampleExtractText {
+      font-size: 0.9rem;
+      font-style: italic;
+      line-height: 1.6;
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      margin-bottom: 10px;
+    }
+
+    /* Collapsible content feedback */
+    details.debrief-block summary { cursor: pointer; list-style: none; }
+    details.debrief-block summary::-webkit-details-marker { display: none; }
+    details.debrief-block summary h3 { display: inline-block; margin-bottom: 6px; }
+    details.debrief-block summary h3::after { content: ' \25B8'; }
+    details[open].debrief-block summary h3::after { content: ' \25BE'; }
 
     #reportLoading {
       text-align: center;
-      color: var(--muted);
-      padding: 24px 0;
+      color: var(--accent, #38bdf8);
+      padding: 28px 0;
       font-family: 'Inter', sans-serif;
-      font-size: 0.9rem;
+      font-size: 1.05rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
       display: none;
+      animation: reportPulse 1.4s ease-in-out infinite;
     }
+    @keyframes reportPulse { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
+
+    .replay-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
+    .replay-text { font-size: 0.9rem; opacity: 0.85; }
+
+    /* ── TOAST ───────────────────────────────────────────────────────────────── */
+    #toast {
+      position: fixed;
+      bottom: 96px;
+      left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      background: var(--surface-solid);
+      border: 1px solid var(--border-solid);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.85rem;
+      padding: 10px 18px;
+      border-radius: 10px;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.25s, transform 0.25s;
+      z-index: 200;
+      max-width: 80vw;
+    }
+    #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+    #debriefSummary.degraded { color: var(--warn); }
 
     /* ── SCROLLBAR global ────────────────────────────────────────────────────── */
     ::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -1106,11 +1224,12 @@
     </div><!-- /bento-grid -->
 
     <!-- Report loading -->
-    <div id="reportLoading">Generating debrief with Claude…</div>
+    <div id="reportLoading">⏳ Preparing your debrief… this takes a few seconds.</div>
 
-    <!-- Debrief section -->
+    <!-- Debrief section (modal overlay) -->
     <div id="debriefSection">
       <div class="bento-card debrief-card">
+        <button id="btnCloseDebrief">✕ Close</button>
         <div class="debrief-title-row">
           <span class="debrief-title">Session Debrief</span>
           <span class="debrief-topic" id="debriefTopic"></span>
@@ -1121,6 +1240,32 @@
           <span class="sf-icon">🎙</span>
           <span id="spokenFeedbackText"></span>
           <button class="btn-replay" id="btnReplayFeedback">&#9654; Replay</button>
+        </div>
+
+        <!-- Summary — lead with the overall assessment -->
+        <div id="debriefSummary"></div>
+
+        <!-- Your Moments — real best/roughest audio + Claude's take + the improved version -->
+        <div id="momentsBlock" style="display:none" class="moments-box">
+          <div class="mo-label">Your Moments</div>
+          <div class="moment" id="bestMoment" style="display:none">
+            <div class="replay-row">
+              <button class="btn-hear btn-best" id="btnPlayBest">&#9654; Strongest</button>
+              <span class="replay-text" id="bestMomentText"></span>
+            </div>
+            <p class="moment-note" id="highlightMomentText"></p>
+          </div>
+          <div class="moment" id="worstMoment" style="display:none">
+            <div class="replay-row">
+              <button class="btn-hear btn-rough" id="btnPlayWorst">&#9654; Roughest</button>
+              <span class="replay-text" id="worstMomentText"></span>
+            </div>
+            <div class="moment-fix" id="exampleExtractBlock" style="display:none">
+              <div class="fix-label">How it could sound</div>
+              <div id="exampleExtractText"></div>
+              <button class="btn-hear" id="btnPlayExample">&#9654; Hear Example</button>
+            </div>
+          </div>
         </div>
 
         <!-- Strengths + Improvements -->
@@ -1135,55 +1280,32 @@
           </div>
         </div>
 
-        <!-- Content feedback -->
-        <div class="debrief-block">
-          <h3>Content Feedback</h3>
-          <ul id="contentList"></ul>
-        </div>
-
         <!-- Filler breakdown -->
         <div class="debrief-block">
           <h3>Filler Breakdown</h3>
           <div class="chips-row" id="fillerChips"></div>
         </div>
 
-        <!-- Repetition flags -->
-        <div class="debrief-block">
-          <h3>Repetition Flags</h3>
+        <!-- Delivery flags — repetition, jargon, incomplete sentences; hidden when clean -->
+        <div class="debrief-block" id="deliveryFlagsBlock" style="display:none">
+          <h3>Delivery Flags</h3>
           <div class="chips-row" id="repetitionChips"></div>
-        </div>
-
-        <!-- Jargon flags -->
-        <div class="debrief-block">
-          <h3>Jargon Flags</h3>
           <div class="chips-row" id="jargonChips"></div>
-        </div>
-
-        <!-- Sentence completion -->
-        <div class="debrief-block">
-          <h3>Sentence Completion</h3>
           <div class="completion-line" id="sentenceCompletion"></div>
         </div>
 
-        <!-- Highlight moment -->
-        <div id="highlightMomentBlock" style="display:none" class="highlight-box">
-          <div class="hl-label">Highlight Moment — Best Delivery</div>
-          <p id="highlightMomentText"></p>
-        </div>
-
-        <!-- Example extract -->
-        <div id="exampleExtractBlock" style="display:none" class="example-box">
-          <div class="ex-label">Example: How This Could Sound</div>
-          <div id="exampleExtractText"></div>
-          <button class="btn-hear" id="btnPlayExample">&#9654; Hear Example</button>
-        </div>
-
-        <!-- Summary -->
-        <div id="debriefSummary"></div>
+        <!-- Content feedback — collapsed by default -->
+        <details class="debrief-block" id="contentDetails">
+          <summary><h3>Content Feedback</h3></summary>
+          <ul id="contentList"></ul>
+        </details>
       </div>
     </div>
 
   </div><!-- /main-wrapper -->
+
+  <!-- Toast notifications -->
+  <div id="toast"></div>
 
   <!-- Fixed control bar -->
   <div class="control-bar">
@@ -1211,6 +1333,9 @@
     let audioWs = null;
     let nudgeTimeout = null;
     let streakTimeout = null;
+    let ttsCtx = null; // shared AudioContext for TTS — created on first user gesture
+    let sessionPcm = [];     // array of Float32Array chunks for the whole session
+    let sessionPcmRate = 0;  // sample rate of the captured audio
     let transcriptCleared = false;
     let sessionMode = 'individual';
 
@@ -1241,6 +1366,28 @@
     // ── Socket.IO ──────────────────────────────────────────────────────────────
     const socket = io({ transports: ['websocket', 'polling'] });
 
+    // Disable Start until the socket handshake completes and we have a stable sid
+    document.getElementById('btnStart').disabled = true;
+    let lastSid = null;
+    socket.on('connect', () => {
+      document.getElementById('btnStart').disabled = false;
+      if (lastSid && lastSid !== socket.id) {
+        // Reconnected: re-attach to the server-side session state
+        socket.emit('resume', { old_sid: lastSid }, (resp) => {
+          if (!(resp && resp.resumed) && sessionActive) {
+            showToast('Connection was lost too long. Stats restarted, keep talking.');
+          }
+        });
+        if (sessionActive) reconnectAudioWs();
+      }
+      lastSid = socket.id;
+      setStatus(sessionActive ? 'Streaming…' : 'Ready', sessionActive);
+    });
+    socket.on('disconnect', () => {
+      document.getElementById('btnStart').disabled = true;
+      setStatus('Reconnecting...');
+    });
+
     socket.on('event', (data) => {
       switch (data.type) {
         case 'transcript':
@@ -1264,6 +1411,19 @@
     });
 
     // ── UI helpers ─────────────────────────────────────────────────────────────
+    let toastTimer = null;
+    let lastToastAt = 0;
+    function showToast(msg) {
+      const now = Date.now();
+      if (now - lastToastAt < 5000) return; // rate-limit repeated failures
+      lastToastAt = now;
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.classList.add('show');
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(() => t.classList.remove('show'), 4000);
+    }
+
     function setStatus(text, active = false) {
       document.getElementById('statusText').textContent = text;
       document.getElementById('statusDot').classList.toggle('active', active);
@@ -1485,26 +1645,37 @@
     // ── TTS ────────────────────────────────────────────────────────────────────
     async function playNudgeAudio(text) {
       try {
+        // Reuse a single AudioContext — browsers block new ones without user gesture
+        if (!ttsCtx) ttsCtx = new AudioContext();
+        if (ttsCtx.state === 'suspended') await ttsCtx.resume();
+
         const res = await fetch('/api/speak', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text }),
         });
-        if (!res.ok) return;
+        if (!res.ok) {
+          console.warn('[tts] /api/speak returned', res.status);
+          showToast('Voice playback is unavailable right now. Text feedback still works.');
+          return;
+        }
         const arrayBuffer = await res.arrayBuffer();
-        const ctx = new AudioContext();
-        const decoded = await ctx.decodeAudioData(arrayBuffer);
-        const src = ctx.createBufferSource();
+        const decoded = await ttsCtx.decodeAudioData(arrayBuffer);
+        const src = ttsCtx.createBufferSource();
         src.buffer = decoded;
-        src.connect(ctx.destination);
+        src.connect(ttsCtx.destination);
         src.start();
-      } catch (e) { console.warn('[tts] Audio playback failed:', e); }
+      } catch (e) {
+        console.warn('[tts] Audio playback failed:', e);
+        showToast('Voice playback is unavailable right now. Text feedback still works.');
+      }
     }
 
     // ── Audio capture ──────────────────────────────────────────────────────────
     async function startAudioCapture() {
       mediaStream = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
       audioContext = new AudioContext();
+      sessionPcmRate = audioContext.sampleRate;
 
       const source = audioContext.createMediaStreamSource(mediaStream);
       const bufferSize = 4096;
@@ -1518,6 +1689,8 @@
         const rms = Math.sqrt(sumSq / float32.length);
         updateEnergyBar(rms);
 
+        sessionPcm.push(new Float32Array(float32));
+
         if (!audioWs || audioWs.readyState !== WebSocket.OPEN) return;
         const pcm16 = float32ToPcm16(float32);
         audioWs.send(pcm16.buffer);
@@ -1526,12 +1699,29 @@
       source.connect(processorNode);
       processorNode.connect(audioContext.destination);
 
+      connectAudioWs();
+    }
+
+    function connectAudioWs() {
       const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
-      audioWs = new WebSocket(`${wsProto}://${location.host}/ws/audio?sample_rate=${audioContext.sampleRate}`);
+      audioWs = new WebSocket(`${wsProto}://${location.host}/ws/audio?sample_rate=${audioContext.sampleRate}&sid=${socket.id}`);
       audioWs.binaryType = 'arraybuffer';
       audioWs.onopen = () => setStatus('Streaming…', true);
-      audioWs.onclose = () => { if (sessionActive) setStatus('Reconnecting…'); };
+      audioWs.onclose = () => {
+        if (sessionActive) {
+          setStatus('Reconnecting…');
+          setTimeout(reconnectAudioWs, 1000);
+        }
+      };
       audioWs.onerror = (e) => console.error('[ws] Audio error:', e);
+    }
+
+    function reconnectAudioWs() {
+      // Mic graph stays alive; onaudioprocess no-ops while the WS is closed,
+      // so reopening the WS resumes streaming with no other work.
+      if (!sessionActive || !audioContext) return;
+      if (audioWs && (audioWs.readyState === WebSocket.OPEN || audioWs.readyState === WebSocket.CONNECTING)) return;
+      connectAudioWs();
     }
 
     function float32ToPcm16(float32Array) {
@@ -1559,10 +1749,16 @@
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
+            sid: socket.id,
             mode: sessionMode,
             topic: document.getElementById('topicInput').value.trim(),
           }),
         });
+        // Prime TTS AudioContext during user gesture so it's unlocked for socket-triggered nudges
+        if (!ttsCtx) ttsCtx = new AudioContext();
+
+        sessionPcm = [];
+        sessionPcmRate = 0;
         await startAudioCapture();
 
         sessionActive = true;
@@ -1576,7 +1772,7 @@
         document.getElementById('wpmValue').textContent = '—';
         document.getElementById('fillerCount').textContent = '0';
         document.getElementById('pauseCount').textContent = '0';
-        document.getElementById('debriefSection').style.display = 'none';
+        document.getElementById('debriefSection').classList.remove('open');
         document.getElementById('reportLoading').style.display = 'none';
         updateSessionSummary();
 
@@ -1599,7 +1795,11 @@
       stopAudioCapture();
       stopTimer();
       setVisualizerActive(false);
-      await fetch('/api/stop', { method: 'POST' });
+      await fetch('/api/stop', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sid: socket.id }),
+      });
 
       document.getElementById('btnStart').disabled = false;
       document.getElementById('btnStart').classList.add('pulsing');
@@ -1610,17 +1810,40 @@
       if (cursorEl && cursorEl.parentNode) cursorEl.parentNode.removeChild(cursorEl);
     });
 
-    // ── End & Debrief ──────────────────────────────────────────────────────────
+    // ── End & Debrief — stops session then generates report ───────────────────
     document.getElementById('btnReport').addEventListener('click', async () => {
+      // Stop session first if still active
+      if (sessionActive) {
+        sessionActive = false;
+        stopAudioCapture();
+        stopTimer();
+        setVisualizerActive(false);
+        await fetch('/api/stop', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ sid: socket.id }),
+        });
+        document.getElementById('btnStop').disabled = true;
+        setStatus('Stopped');
+      }
+
+      // Ensure TTS context is unlocked — this click counts as a user gesture
+      if (!ttsCtx) ttsCtx = new AudioContext();
+      if (ttsCtx.state === 'suspended') ttsCtx.resume();
+
+      // Lock controls while the debrief is being prepared so there's a clear "wait" state
+      const startBtn = document.getElementById('btnStart');
+      startBtn.disabled = true;
+      startBtn.classList.remove('pulsing');
       document.getElementById('btnReport').disabled = true;
       document.getElementById('reportLoading').style.display = 'block';
-      document.getElementById('debriefSection').style.display = 'none';
+      setStatus('Preparing debrief…');
       const topic = document.getElementById('topicInput').value.trim();
       try {
         const res = await fetch('/api/report', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ topic }),
+          body: JSON.stringify({ sid: socket.id, topic }),
         });
         const data = await res.json();
         renderDebrief(data);
@@ -1629,7 +1852,16 @@
       } finally {
         document.getElementById('reportLoading').style.display = 'none';
         document.getElementById('btnReport').disabled = false;
+        // Restore the mic for the next session only after the debrief is ready
+        const startBtn = document.getElementById('btnStart');
+        startBtn.disabled = false;
+        startBtn.classList.add('pulsing');
+        setStatus('Ready');
       }
+    });
+
+    document.getElementById('btnCloseDebrief').addEventListener('click', () => {
+      document.getElementById('debriefSection').classList.remove('open');
     });
 
     // ── Debrief rendering ──────────────────────────────────────────────────────
@@ -1662,12 +1894,50 @@
       }
     }
 
+    function playPcmRange(startSec, endSec) {
+      if (!sessionPcm.length || !sessionPcmRate) return;
+      const total = sessionPcm.reduce((n, c) => n + c.length, 0);
+      const from = Math.min(Math.max(0, Math.floor(startSec * sessionPcmRate)), total);
+      const to = Math.min(Math.max(from, Math.floor(endSec * sessionPcmRate)), total);
+      const length = to - from;
+      if (length <= 0) return;
+
+      const out = new Float32Array(length);
+      let pos = 0, copied = 0;
+      for (const chunk of sessionPcm) {
+        const chunkStart = pos;
+        const chunkEnd = pos + chunk.length;
+        if (chunkEnd > from && chunkStart < to) {
+          const s = Math.max(0, from - chunkStart);
+          const e = Math.min(chunk.length, to - chunkStart);
+          out.set(chunk.subarray(s, e), copied);
+          copied += (e - s);
+        }
+        pos = chunkEnd;
+      }
+
+      if (!ttsCtx) ttsCtx = new AudioContext();
+      if (ttsCtx.state === 'suspended') ttsCtx.resume();
+      const buf = ttsCtx.createBuffer(1, out.length, sessionPcmRate);
+      buf.getChannelData(0).set(out);
+      const src = ttsCtx.createBufferSource();
+      src.buffer = buf;
+      src.connect(ttsCtx.destination);
+      src.start();
+    }
+
     function renderDebrief(data) {
       document.getElementById('debriefTopic').textContent = data.topic_identified ? '— ' + data.topic_identified : '';
 
       renderList('strengthsList', data.strengths, 'strength-item');
       renderList('improveList', data.improvements, 'improve-item');
-      renderList('contentList', data.content_feedback, 'improve-item');
+
+      // Content feedback — collapsed by default, hidden entirely when empty
+      const content = data.content_feedback || [];
+      renderList('contentList', content, 'improve-item');
+      const contentDetails = document.getElementById('contentDetails');
+      contentDetails.style.display = content.length ? '' : 'none';
+      contentDetails.open = false;
 
       // Filler breakdown chips
       const chips = document.getElementById('fillerChips');
@@ -1689,23 +1959,33 @@
           });
       }
 
-      renderChips('repetitionChips', data.repetition_flags || [], 'rep-chip', 'None detected \u2713');
-      renderChips('jargonChips', data.jargon_flags || [], 'jargon-chip', 'None detected \u2713');
+      // Delivery flags \u2014 one block for repetition, jargon, incomplete sentences.
+      // Clean signals are hidden instead of rendering "None detected" rows.
+      const reps = data.repetition_flags || [];
+      const jargon = data.jargon_flags || [];
+      const completion = (data.sentence_completion_rate || '').trim();
+      const completionNeedsWork = completion && !/^good/i.test(completion);
+      renderChips('repetitionChips', reps, 'rep-chip', '');
+      renderChips('jargonChips', jargon, 'jargon-chip', '');
+      document.getElementById('repetitionChips').style.display = reps.length ? '' : 'none';
+      document.getElementById('jargonChips').style.display = jargon.length ? '' : 'none';
+      const compEl = document.getElementById('sentenceCompletion');
+      compEl.textContent = completionNeedsWork ? completion : '';
+      compEl.style.display = completionNeedsWork ? '' : 'none';
+      document.getElementById('deliveryFlagsBlock').style.display =
+        (reps.length || jargon.length || completionNeedsWork) ? 'block' : 'none';
 
-      document.getElementById('sentenceCompletion').textContent = data.sentence_completion_rate || '';
+      const summaryEl = document.getElementById('debriefSummary');
+      summaryEl.textContent = data.summary || '';
+      summaryEl.classList.toggle('degraded', !!data.degraded);
 
-      const highlightText = data.highlight_moment || '';
-      if (highlightText) {
-        document.getElementById('highlightMomentText').textContent = highlightText;
-        document.getElementById('highlightMomentBlock').style.display = 'block';
-      } else {
-        document.getElementById('highlightMomentBlock').style.display = 'none';
-      }
-
-      document.getElementById('debriefSummary').textContent = data.summary || '';
-
-      // Spoken feedback
-      const spokenText = data.spoken_feedback || '';
+      // Spoken feedback — fall back to first improvement or summary if field is
+      // empty. Suppressed entirely for degraded reports (it would speak the
+      // outage notice aloud).
+      const spokenText = data.degraded ? '' : (data.spoken_feedback
+        || (data.improvements && data.improvements[0])
+        || data.summary
+        || '');
       const sfBar = document.getElementById('spokenFeedbackBar');
       if (spokenText) {
         document.getElementById('spokenFeedbackText').textContent = spokenText;
@@ -1716,19 +1996,52 @@
         sfBar.style.display = 'none';
       }
 
-      // Example extract
+      // Your Moments — best/roughest real audio, Claude's take, and the improved version.
+      // Degrades gracefully: without audio (offline) the text insights still show,
+      // just without play buttons.
+      const replay = data.replay || {};
+      const best = replay.best;
+      const worst = replay.worst;
+      const haveAudio = sessionPcm.length > 0 && sessionPcmRate > 0;
+      const highlightText = data.highlight_moment || '';
       const extract = data.example_extract || '';
-      const exBlock = document.getElementById('exampleExtractBlock');
+
+      const bestBtn = document.getElementById('btnPlayBest');
+      document.getElementById('bestMomentText').textContent = (best && best.text) || '';
+      document.getElementById('highlightMomentText').textContent = highlightText;
+      if (haveAudio && best) {
+        bestBtn.style.display = '';
+        bestBtn.onclick = () => playPcmRange(best.start, best.end);
+      } else {
+        bestBtn.style.display = 'none';
+      }
+      const showBest = (haveAudio && best) || highlightText;
+      document.getElementById('bestMoment').style.display = showBest ? '' : 'none';
+
+      const worstBtn = document.getElementById('btnPlayWorst');
+      document.getElementById('worstMomentText').textContent = (worst && worst.text) || '';
+      if (haveAudio && worst) {
+        worstBtn.style.display = '';
+        worstBtn.onclick = () => playPcmRange(worst.start, worst.end);
+      } else {
+        worstBtn.style.display = 'none';
+      }
+      const fixBlock = document.getElementById('exampleExtractBlock');
       if (extract) {
         document.getElementById('exampleExtractText').textContent = extract;
-        exBlock.style.display = 'block';
+        fixBlock.style.display = '';
         document.getElementById('btnPlayExample').onclick = () => playNudgeAudio(extract);
       } else {
-        exBlock.style.display = 'none';
+        fixBlock.style.display = 'none';
       }
+      const showWorst = (haveAudio && worst) || extract;
+      document.getElementById('worstMoment').style.display = showWorst ? '' : 'none';
 
-      document.getElementById('debriefSection').style.display = 'block';
-      document.getElementById('debriefSection').scrollIntoView({ behavior: 'smooth' });
+      document.getElementById('momentsBlock').style.display = (showBest || showWorst) ? 'block' : 'none';
+
+      const ds = document.getElementById('debriefSection');
+      ds.classList.add('open');
+      ds.scrollTop = 0;
     }
   </script>
 </body>

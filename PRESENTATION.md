@@ -137,11 +137,10 @@ After your session, Claude generates:
 git clone https://github.com/srismart/Speakero
 pip install -r requirements.txt
 cp .env.example .env   # add your keys
-uvicorn main:app --reload
-python background_agent.py
+uvicorn main:app --port 8080
 ```
 
-**Open http://localhost:8000**
+**Open http://localhost:8080**
 
 ---
 
