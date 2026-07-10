@@ -16,6 +16,8 @@ from dotenv import load_dotenv
 from filler_detector import FillerDetector
 from tts import speak
 from report import generate_report
+from auth import verify_token
+import limits
 
 load_dotenv()
 
@@ -43,6 +45,12 @@ class SessionState:
         self.highlight_window: str = ""
         self.room: str = ""
         self.cleanup_task: asyncio.Task | None = None
+        self.user_id: str | None = None
+        self.tier: str = "anonymous"
+        self.limit_task: asyncio.Task | None = None
+        self.tts_calls: int = 0
+        self.report_cache: dict | None = None
+        self.usage: dict = {"input_tokens": 0, "output_tokens": 0, "llm_calls": 0}
 
     def start(self):
         self.active = True
@@ -150,12 +158,16 @@ fastapi_app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @sio.event
-async def connect(sid, environ):
+async def connect(sid, environ, auth=None):
     sess = SessionState()
     sess.room = sid
+    token = (auth or {}).get("token") if isinstance(auth, dict) else None
+    ctx = verify_token(f"Bearer {token}") if token else None
+    if ctx:
+        sess.user_id, sess.tier = ctx.user_id, ctx.tier
     SESSIONS[sid] = sess
     await sio.enter_room(sid, sid)
-    print(f"[sio] Client connected: {sid}")
+    print(f"[sio] Client connected: {sid} (user={sess.user_id or 'anon'})")
 
 
 @sio.event
@@ -197,6 +209,24 @@ async def index():
     return FileResponse("static/index.html")
 
 
+@fastapi_app.get("/api/config")
+async def api_config():
+    return JSONResponse({
+        "supabase_url": os.getenv("SUPABASE_URL", ""),
+        "supabase_anon_key": os.getenv("SUPABASE_ANON_KEY", ""),
+    })
+
+
+def _binding_check(request: Request, sess: SessionState):
+    """Returns (auth_ctx, error_response|None). A session with an owner may
+    only be driven by that owner; anonymous sessions are open (no identity
+    to verify) and adopt the caller's identity at /api/start."""
+    ctx = verify_token(request.headers.get("authorization"))
+    if sess.user_id is not None and (ctx is None or ctx.user_id != sess.user_id):
+        return ctx, JSONResponse({"error": "not your session"}, status_code=401)
+    return ctx, None
+
+
 @fastapi_app.post("/api/speak")
 async def api_speak(request: Request):
     data = await request.json()
@@ -227,6 +257,9 @@ async def api_report(request: Request):
     sess = SESSIONS.get(sid)
     if sess is None:
         return JSONResponse({"error": "unknown session"}, status_code=404)
+    _ctx, err = _binding_check(request, sess)
+    if err:
+        return err
     transcript = sess.full_transcript()
     stats = sess.detector.get_stats()
     topic = data.get("topic", "")
@@ -296,6 +329,9 @@ async def api_stop(request: Request):
     sess = SESSIONS.get(sid)
     if sess is None:
         return JSONResponse({"error": "unknown session"}, status_code=404)
+    _ctx, err = _binding_check(request, sess)
+    if err:
+        return err
     sess.stop()
     if sess.coaching_task and not sess.coaching_task.done():
         sess.coaching_task.cancel()
