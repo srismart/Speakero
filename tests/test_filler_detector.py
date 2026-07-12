@@ -177,3 +177,62 @@ def test_replay_windows_invalid_index_falls_back_to_heuristic():
     rw = d.get_replay_windows(roughest_index=99)
     assert rw["worst"] is not None
     assert rw["worst"]["text"] == "stuff"
+
+
+def test_pulse_leading_space_tokens_are_matched():
+    # Pulse chunk-initial tokens carry a leading space (observed 2026-07-11:
+    # ' So', ' um', ' you'); whitespace must be stripped before matching.
+    d = FillerDetector()
+    d.start_session()
+    d.process_words([
+        {"word": " So", "start": 0.0, "end": 0.2},
+        {"word": "um,", "start": 0.2, "end": 0.4},
+        {"word": "this", "start": 0.4, "end": 0.6},
+        {"word": "is", "start": 0.6, "end": 0.7},
+        {"word": "basically", "start": 0.7, "end": 1.0},
+        {"word": "like", "start": 1.0, "end": 1.2},
+        {"word": "a", "start": 1.2, "end": 1.3},
+        {"word": "test", "start": 1.3, "end": 1.6},
+    ])
+    d.process_words([{"word": " um", "start": 2.0, "end": 2.2}])
+    stats = d.get_stats()
+    assert stats["fillerBreakdown"].get("so") == 1
+    assert stats["fillerBreakdown"].get("um") == 2
+    assert stats["fillerBreakdown"].get("basically") == 1
+    assert stats["fillerBreakdown"].get("like") == 1
+    assert stats["fillerCount"] == 5
+
+
+def test_pulse_leading_space_phrase_match():
+    d = FillerDetector()
+    d.start_session()
+    d.process_words([
+        {"word": " you", "start": 0.0, "end": 0.2},
+        {"word": "know,", "start": 0.2, "end": 0.4},
+        {"word": "the", "start": 0.4, "end": 0.6},
+    ])
+    assert d.get_stats()["fillerBreakdown"].get("you know") == 1
+
+
+def test_windows_carry_stream_epoch():
+    # Each audio-WS (re)connect starts a new Pulse stream whose clock resets
+    # to 0; windows must carry the epoch so the client can offset its PCM.
+    d = FillerDetector()
+    d.start_session()
+    d.process_words([
+        {"word": "hello", "start": 0.0, "end": 0.5},
+        {"word": "world", "start": 0.5, "end": 1.0},
+        {"word": "again", "start": 1.0, "end": 1.4},
+        {"word": "now", "start": 1.4, "end": 1.8},
+    ], epoch=0)
+    # reconnect: new stream, clock restarts, filler-heavy chunk
+    d.process_words([
+        {"word": "um", "start": 0.0, "end": 0.2},
+        {"word": "like", "start": 0.2, "end": 0.4},
+        {"word": "basically", "start": 0.4, "end": 0.8},
+        {"word": "stuff", "start": 0.8, "end": 1.1},
+    ], epoch=1)
+    rw = d.get_replay_windows()
+    assert rw["best"]["epoch"] == 0
+    assert rw["worst"]["epoch"] == 1
+    assert rw["worst"]["start"] == 0.0  # stream-relative, offset by the client

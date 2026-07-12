@@ -47,6 +47,7 @@ class SessionState:
         self.cleanup_task: asyncio.Task | None = None
         self.user_id: str | None = None
         self.tier: str = "anonymous"
+        self.stream_epoch: int = -1  # increments per audio-WS connect; Pulse clock resets each time
         self.limit_task: asyncio.Task | None = None
         self.tts_calls: int = 0
         self.report_cache: dict | None = None
@@ -58,6 +59,7 @@ class SessionState:
         self.full_transcript_parts = []
         self.start_time = time.time()
         self.highlight_window = ""
+        self.stream_epoch = -1
         self._transcript_buffer.clear()
 
     def stop(self):
@@ -426,7 +428,8 @@ async def audio_ws(websocket: WebSocket):
     if sess is None:
         await websocket.close(code=4004)
         return
-    print(f"[ws] Browser audio WebSocket connected (sid={sid}, sample_rate={sample_rate})")
+    sess.stream_epoch += 1
+    print(f"[ws] Browser audio WebSocket connected (sid={sid}, sample_rate={sample_rate}, epoch={sess.stream_epoch})")
 
     pulse_url = (
         f"{PULSE_WS_URL}"
@@ -497,11 +500,11 @@ async def _handle_pulse_message(raw_msg: str | bytes, sess: SessionState, sid: s
 
     if words:
         print(f"[pulse] words: {[w.get('word') for w in words]}")
-        result = sess.detector.process_words(words)
+        result = sess.detector.process_words(words, epoch=max(sess.stream_epoch, 0))
         new_fillers = result["new_fillers"]
         stats = result["stats"]
 
-        text_from_words = " ".join(w.get("word", "") for w in words)
+        text_from_words = " ".join(w.get("word", "").strip() for w in words)
         sess.add_text(text_from_words)
 
         await sio.emit("event", {"type": "transcript", "text": text_from_words, "is_final": is_final}, room=sid)
