@@ -3,6 +3,49 @@ import json
 import anthropic
 from typing import Dict, Any
 
+_client: anthropic.AsyncAnthropic | None = None
+
+
+def _get_client() -> anthropic.AsyncAnthropic:
+    global _client
+    if _client is None:
+        api_key = os.getenv("ANTHROPIC_API_KEY")
+        if not api_key:
+            raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
+        _client = anthropic.AsyncAnthropic(api_key=api_key, timeout=30.0)
+    return _client
+
+
+def _str_array():
+    return {"type": "array", "items": {"type": "string"}}
+
+
+# filler_breakdown is intentionally absent: the caller injects the detector's
+# real counts (deterministic) instead of having the LLM echo them.
+REPORT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "roughest_window_index": {"type": "integer"},
+        "topic_identified": {"type": "string"},
+        "strengths": _str_array(),
+        "improvements": _str_array(),
+        "content_feedback": _str_array(),
+        "summary": {"type": "string"},
+        "spoken_feedback": {"type": "string"},
+        "example_extract": {"type": "string"},
+        "repetition_flags": _str_array(),
+        "jargon_flags": _str_array(),
+        "sentence_completion_rate": {"type": "string"},
+        "highlight_moment": {"type": "string"},
+    },
+    "required": [
+        "roughest_window_index", "topic_identified", "strengths", "improvements",
+        "content_feedback", "summary", "spoken_feedback", "example_extract",
+        "repetition_flags", "jargon_flags", "sentence_completion_rate", "highlight_moment",
+    ],
+    "additionalProperties": False,
+}
+
 
 async def generate_report(
     transcript: str,
@@ -11,14 +54,9 @@ async def generate_report(
     mode: str = "individual",
     highlight_window: str = "",
     candidate_windows: list | None = None,
+    usage_sink: dict | None = None,
 ) -> Dict[str, Any]:
-    api_key = os.getenv("ANTHROPIC_API_KEY")
-    if not api_key:
-        raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
-
-    client = anthropic.AsyncAnthropic(api_key=api_key)
-
-    filler_info = json.dumps(stats.get("fillerBreakdown", {}))
+    filler_info = json.dumps(stats.get("fillerBreakdown", {}), sort_keys=True)
 
     if topic and topic.lower() not in ("", "self-identify"):
         topic_line = f"SPEECH TOPIC: {topic}"
@@ -62,25 +100,21 @@ async def generate_report(
             "Specifically call out what was good about this moment of the speech in 'highlight_moment'."
         )
     else:
-        highlight_section = "\n(No highlight window available — set 'highlight_moment' to empty string.)"
+        highlight_section = "\n(No highlight window available; set 'highlight_moment' to empty string.)"
 
-    # Roughest-moment selection: let Claude choose which window had the worst delivery
-    # (rambling, abandoned thoughts, fillers, awkward pauses) from a numbered candidate
-    # list, returned as an index. Folded into this same call to avoid an extra request.
+    # Roughest-moment selection: Claude picks the worst-delivery window from a
+    # numbered candidate list, folded into this same call to avoid an extra request.
     if candidate_windows:
         window_lines = "\n".join(f'{c["index"]}: {c["text"]}' for c in candidate_windows)
         roughest_section = (
             "\nCANDIDATE WINDOWS (numbered segments of the talk):\n"
             f"{window_lines}\n"
-            "From the numbered list above, pick the index of the window with the ROUGHEST "
-            "delivery — most rambling, abandoned thoughts, awkward pauses, or filler. "
-            "Return that integer as 'roughest_window_index'. If none clearly stands out, "
-            "pick the most filler-heavy one. If the list is empty, use -1."
+            "For 'roughest_window_index', pick the index of the window with the ROUGHEST "
+            "delivery: most rambling, abandoned thoughts, awkward pauses, or filler. "
+            "If none stands out, pick the most filler-heavy one."
         )
-        roughest_key = '  "roughest_window_index": <integer index from the candidate list above, or -1 if none>,\n'
     else:
-        roughest_section = ""
-        roughest_key = ""
+        roughest_section = "\n(No candidate windows available; set 'roughest_window_index' to -1.)"
 
     prompt = f"""You are an expert speaking coach. Analyze this practice session transcript and stats.
 
@@ -102,50 +136,27 @@ SESSION STATS:
 {highlight_section}
 {roughest_section}
 
-Return ONLY a valid JSON object (no markdown, no code fences) with exactly these keys:
-{{
-{roughest_key}  "topic_identified": "the topic you identified or confirmed",
-  "strengths": ["string", "string"],
-  "improvements": ["string", "string", "string"],
-  "content_feedback": ["string", "string", "string"],
-  "filler_breakdown": {{"word": count}},
-  "summary": "one paragraph overall assessment",
-  "spoken_feedback": "REQUIRED — the single most important coaching point as 1 natural spoken sentence (max 20 words). Must never be empty.",
-  "example_extract": "REQUIRED — rewrite 1-2 sentences from the transcript showing how they could be delivered better. Must be natural and speakable aloud. Never empty.",
-  "repetition_flags": ["up to 3 phrases repeated too often — empty list if none"],
-  "jargon_flags": ["up to 3 overly technical phrases that may confuse a general audience — empty list if none"],
-  "sentence_completion_rate": "Claude's assessment as a string like 'Good — most sentences were completed' or 'Needs work — several abandoned thoughts detected'",
-  "highlight_moment": "Claude's comment on the best delivery window, or empty string if no window was provided"
-}}
+Field guidance:
+- spoken_feedback: the single most important coaching point as 1 natural spoken sentence (max 20 words).
+- example_extract: rewrite 1-2 sentences from the transcript showing better delivery; natural and speakable.
+- repetition_flags / jargon_flags: up to 3 items each; empty arrays if none.
+- sentence_completion_rate: like "Good - most sentences were completed" or "Needs work - several abandoned thoughts".
+- highlight_moment: comment on the best delivery window, or empty string if none was provided.
+- roughest_window_index: integer index from the candidate list, or -1.
+Be specific, actionable, and encouraging. Base your analysis strictly on the data provided."""
 
-Be specific, actionable, and encouraging. Base your analysis strictly on the data provided.
-For repetition_flags and jargon_flags: return actual empty arrays [] if there are no issues, not arrays with placeholder strings."""
-
-    report = None
-    parse_error: Exception | None = None
-    for _attempt in range(2):
-        message = await client.messages.create(
-            model="claude-sonnet-4-6",
-            max_tokens=2000,
-            messages=[{"role": "user", "content": prompt}],
-        )
-
-        raw = message.content[0].text.strip()
-
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-            raw = raw.strip()
-
-        try:
-            report = json.loads(raw)
-            break
-        except json.JSONDecodeError as e:
-            parse_error = e
-
-    if report is None:
-        raise parse_error
+    client = _get_client()
+    message = await client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=2000,
+        output_config={"format": {"type": "json_schema", "schema": REPORT_SCHEMA}},
+        messages=[{"role": "user", "content": prompt}],
+    )
+    if usage_sink is not None:
+        usage_sink["input_tokens"] += message.usage.input_tokens
+        usage_sink["output_tokens"] += message.usage.output_tokens
+        usage_sink["llm_calls"] += 1
+    report = json.loads(message.content[0].text)
 
     # Normalize Claude's roughest pick to a usable index or None (it may be
     # missing, -1, or a string). Callers pass it to get_replay_windows().

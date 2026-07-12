@@ -103,7 +103,14 @@ uvicorn main:app --port 8080
 | Variable | Description |
 |---|---|
 | `SMALLEST_API_KEY` | [smallest.ai](https://smallest.ai) API key — used for Pulse STT and Lightning TTS |
-| `ANTHROPIC_API_KEY` | [Anthropic](https://console.anthropic.com) API key — used for Claude Sonnet |
+| `ANTHROPIC_API_KEY` | [Anthropic](https://console.anthropic.com) API key — used for Claude nudges + debrief |
+| `SUPABASE_URL` | Optional — Supabase project URL. Without the Supabase vars the app runs anonymous-only |
+| `SUPABASE_ANON_KEY` | Optional — Supabase anon public key (served to the frontend) |
+| `SUPABASE_SERVICE_KEY` | Optional — Supabase service_role key (server only) |
+| `SUPABASE_JWT_SECRET` | Optional — Supabase JWT secret for verifying access tokens |
+
+Auth, tier limits, and the admin console are configured in Supabase — see
+[docs/SETUP-supabase.md](docs/SETUP-supabase.md).
 
 ---
 

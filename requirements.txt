@@ -8,3 +8,4 @@ httpx
 websockets
 aiofiles
 aiohttp
+PyJWT

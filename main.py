@@ -16,6 +16,8 @@ from dotenv import load_dotenv
 from filler_detector import FillerDetector
 from tts import speak
 from report import generate_report
+from auth import verify_token
+import limits
 
 load_dotenv()
 
@@ -43,6 +45,12 @@ class SessionState:
         self.highlight_window: str = ""
         self.room: str = ""
         self.cleanup_task: asyncio.Task | None = None
+        self.user_id: str | None = None
+        self.tier: str = "anonymous"
+        self.limit_task: asyncio.Task | None = None
+        self.tts_calls: int = 0
+        self.report_cache: dict | None = None
+        self.usage: dict = {"input_tokens": 0, "output_tokens": 0, "llm_calls": 0}
 
     def start(self):
         self.active = True
@@ -68,9 +76,18 @@ class SessionState:
 
 SESSIONS: dict[str, SessionState] = {}
 
+_anthropic_client: anthropic.AsyncAnthropic | None = None
+
+
+def _get_anthropic() -> anthropic.AsyncAnthropic:
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY, timeout=10.0)
+    return _anthropic_client
+
 
 async def _get_nudge_from_claude(transcript_snippet: str, sess: SessionState) -> str:
-    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    client = _get_anthropic()
 
     if sess.mode == "panel":
         mode_instruction = (
@@ -99,7 +116,7 @@ async def _get_nudge_from_claude(transcript_snippet: str, sess: SessionState) ->
         )
 
     message = await client.messages.create(
-        model="claude-sonnet-4-6",
+        model="claude-haiku-4-5",
         max_tokens=64,
         messages=[
             {
@@ -113,6 +130,9 @@ async def _get_nudge_from_claude(transcript_snippet: str, sess: SessionState) ->
             }
         ],
     )
+    sess.usage["input_tokens"] += message.usage.input_tokens
+    sess.usage["output_tokens"] += message.usage.output_tokens
+    sess.usage["llm_calls"] += 1
     return message.content[0].text.strip()
 
 
@@ -150,12 +170,16 @@ fastapi_app.mount("/static", StaticFiles(directory="static"), name="static")
 
 
 @sio.event
-async def connect(sid, environ):
+async def connect(sid, environ, auth=None):
     sess = SessionState()
     sess.room = sid
+    token = (auth or {}).get("token") if isinstance(auth, dict) else None
+    ctx = verify_token(f"Bearer {token}") if token else None
+    if ctx:
+        sess.user_id, sess.tier = ctx.user_id, ctx.tier
     SESSIONS[sid] = sess
     await sio.enter_room(sid, sid)
-    print(f"[sio] Client connected: {sid}")
+    print(f"[sio] Client connected: {sid} (user={sess.user_id or 'anon'})")
 
 
 @sio.event
@@ -170,6 +194,8 @@ async def disconnect(sid):
         gone = SESSIONS.pop(sid, None)
         if gone and gone.coaching_task and not gone.coaching_task.done():
             gone.coaching_task.cancel()
+        if gone and gone.limit_task and not gone.limit_task.done():
+            gone.limit_task.cancel()
         print(f"[sio] Session {sid} cleaned up after grace period")
 
     sess.cleanup_task = asyncio.create_task(_cleanup())
@@ -197,12 +223,41 @@ async def index():
     return FileResponse("static/index.html")
 
 
+@fastapi_app.get("/api/config")
+async def api_config():
+    return JSONResponse({
+        "supabase_url": os.getenv("SUPABASE_URL", ""),
+        "supabase_anon_key": os.getenv("SUPABASE_ANON_KEY", ""),
+    })
+
+
+def _binding_check(request: Request, sess: SessionState):
+    """Returns (auth_ctx, error_response|None). A session with an owner may
+    only be driven by that owner; anonymous sessions are open (no identity
+    to verify) and adopt the caller's identity at /api/start."""
+    ctx = verify_token(request.headers.get("authorization"))
+    if sess.user_id is not None and (ctx is None or ctx.user_id != sess.user_id):
+        return ctx, JSONResponse({"error": "not your session"}, status_code=401)
+    return ctx, None
+
+
 @fastapi_app.post("/api/speak")
 async def api_speak(request: Request):
     data = await request.json()
     text = data.get("text", "")
+    sid = data.get("sid", "")
     if not text:
         return Response(status_code=400)
+    sess = SESSIONS.get(sid)
+    if sess is None:
+        return JSONResponse({"error": "no active session"}, status_code=401)
+    _ctx, err = _binding_check(request, sess)
+    if err:
+        return err
+    cap = limits.get_config().get("tts_calls_per_session")
+    if cap is not None and sess.tts_calls >= cap:
+        return JSONResponse({"error": "tts limit reached for this session"}, status_code=429)
+    sess.tts_calls += 1
     try:
         audio_bytes = await speak(text)
         return Response(
@@ -227,6 +282,11 @@ async def api_report(request: Request):
     sess = SESSIONS.get(sid)
     if sess is None:
         return JSONResponse({"error": "unknown session"}, status_code=404)
+    _ctx, err = _binding_check(request, sess)
+    if err:
+        return err
+    if sess.report_cache is not None:
+        return JSONResponse(sess.report_cache)
     transcript = sess.full_transcript()
     stats = sess.detector.get_stats()
     topic = data.get("topic", "")
@@ -241,10 +301,13 @@ async def api_report(request: Request):
             mode=mode,
             highlight_window=highlight_window,
             candidate_windows=sess.detector.get_replay_candidates(),
+            usage_sink=sess.usage,
         )
+        report["filler_breakdown"] = stats.get("fillerBreakdown", {})
         report["replay"] = sess.detector.get_replay_windows(
             roughest_index=report.pop("roughest_window_index", None)
         )
+        sess.report_cache = report
         return JSONResponse(report)
     except Exception as e:
         # Stats and replay windows are computed locally — never lose the session
@@ -263,6 +326,17 @@ async def api_report(request: Request):
         })
 
 
+def _log_session_usage(sess: SessionState, ended_by: str):
+    print(json.dumps({
+        "event": "session_usage",
+        "user_id": sess.user_id,
+        "tier": sess.tier,
+        "seconds": round(sess.elapsed_seconds(), 1),
+        "ended_by": ended_by,
+        **sess.usage,
+    }))
+
+
 @fastapi_app.post("/api/start")
 async def api_start(request: Request):
     data = {}
@@ -276,13 +350,46 @@ async def api_start(request: Request):
     sess = SESSIONS.get(sid)
     if sess is None:
         return JSONResponse({"error": "unknown session"}, status_code=404)
+    ctx, err = _binding_check(request, sess)
+    if err:
+        return err
+    if ctx:
+        # Authoritative identity stamp: signing in mid-connection upgrades the session
+        sess.user_id, sess.tier = ctx.user_id, ctx.tier
+
+    ip = (request.headers.get("x-forwarded-for", "").split(",")[0].strip()
+          or (request.client.host if request.client else ""))
+    denied = limits.check_and_count(ctx, ip, data.get("marker", ""))
+    if denied:
+        return JSONResponse(denied, status_code=429)
+
+    minutes = limits.resolve_session_minutes(sess.tier, data.get("requested_minutes"))
+
     sess.start()
     sess.mode = mode
     sess.topic = topic
+    sess.tts_calls = 0
+    sess.report_cache = None
+    sess.usage = {"input_tokens": 0, "output_tokens": 0, "llm_calls": 0}
     if sess.coaching_task and not sess.coaching_task.done():
         sess.coaching_task.cancel()
     sess.coaching_task = asyncio.create_task(coaching_loop(sess))
-    return JSONResponse({"status": "started"})
+
+    if sess.limit_task and not sess.limit_task.done():
+        sess.limit_task.cancel()
+
+    async def _limit_stop():
+        await asyncio.sleep(minutes * 60)
+        if not sess.active:
+            return
+        sess.stop()
+        if sess.coaching_task and not sess.coaching_task.done():
+            sess.coaching_task.cancel()
+        _log_session_usage(sess, "limit")
+        await sio.emit("event", {"type": "session_limit", "tier": sess.tier}, room=sess.room)
+
+    sess.limit_task = asyncio.create_task(_limit_stop())
+    return JSONResponse({"status": "started", "max_minutes": minutes})
 
 
 @fastapi_app.post("/api/stop")
@@ -296,10 +403,17 @@ async def api_stop(request: Request):
     sess = SESSIONS.get(sid)
     if sess is None:
         return JSONResponse({"error": "unknown session"}, status_code=404)
+    _ctx, err = _binding_check(request, sess)
+    if err:
+        return err
     sess.stop()
     if sess.coaching_task and not sess.coaching_task.done():
         sess.coaching_task.cancel()
     sess.coaching_task = None
+    if sess.limit_task and not sess.limit_task.done():
+        sess.limit_task.cancel()
+    sess.limit_task = None
+    _log_session_usage(sess, "user")
     return JSONResponse({"status": "stopped"})
 
 
