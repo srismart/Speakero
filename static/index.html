@@ -1032,6 +1032,37 @@
     .replay-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
     .replay-text { font-size: 0.9rem; opacity: 0.85; }
 
+    /* ── AUTH MODAL ──────────────────────────────────────────────────────────── */
+    #authModal {
+      position: fixed; inset: 0; z-index: 300;
+      background: rgba(2,6,23,0.75);
+      display: none; align-items: center; justify-content: center;
+    }
+    #authModal.open { display: flex; }
+    .auth-card {
+      background: var(--surface-solid);
+      border: 1px solid var(--border-solid);
+      border-radius: 16px;
+      padding: 28px;
+      width: min(92vw, 380px);
+      position: relative;
+      font-family: 'Inter', sans-serif;
+    }
+    .auth-card h3 { color: var(--text); margin-bottom: 8px; }
+    .auth-card p { color: var(--slate-400); font-size: 0.85rem; margin-bottom: 14px; line-height: 1.5; }
+    .auth-card input {
+      width: 100%; padding: 10px 12px; margin-bottom: 10px;
+      background: var(--bg); color: var(--text);
+      border: 1px solid var(--border-solid); border-radius: 8px;
+    }
+    .auth-card .btn-hear { width: 100%; margin-bottom: 4px; }
+    .auth-divider { text-align: center; color: var(--muted); font-size: 0.75rem; margin: 10px 0; }
+    #btnCloseAuth {
+      position: absolute; top: 10px; right: 12px;
+      background: none; border: none; color: var(--muted); cursor: pointer; font-size: 1rem;
+    }
+    #authStatus { min-height: 1em; color: var(--emerald); }
+
     /* ── TOAST ───────────────────────────────────────────────────────────────── */
     #toast {
       position: fixed;
@@ -1086,6 +1117,13 @@
   <header class="app-header">
     <div class="logo">speak<span class="rose">ero</span></div>
     <div class="header-right">
+      <div id="authArea" style="display:none; align-items:center; gap:10px;">
+        <button id="btnSignIn" class="btn-hear">Sign in</button>
+        <div id="userChip" style="display:none; align-items:center; gap:8px;">
+          <span id="userEmail" style="font-size:0.8rem; color:var(--slate-400); font-family:'Inter',sans-serif;"></span>
+          <button id="btnSignOut" class="btn-replay">Sign out</button>
+        </div>
+      </div>
       <button class="icon-btn" title="Settings">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
@@ -1113,6 +1151,13 @@
         <div class="topic-label">Speech Topic</div>
         <input id="topicInput" type="text" placeholder="Self-identify from transcript" />
       </div>
+      <span id="proLengthWrap" style="display:none; margin-left:8px;">
+        <select id="proMinutes" title="Session length (Pro)">
+          <option value="30" selected>30 min</option>
+          <option value="45">45 min</option>
+          <option value="60">60 min</option>
+        </select>
+      </span>
     </div>
 
     <!-- Bento grid -->
@@ -1304,6 +1349,20 @@
 
   </div><!-- /main-wrapper -->
 
+  <!-- Auth modal -->
+  <div id="authModal">
+    <div class="auth-card">
+      <button id="btnCloseAuth">✕</button>
+      <h3>Sign in to Speakero</h3>
+      <p id="authPitch">Save your sessions, track progress over time, and unlock more practice.</p>
+      <input id="authEmail" type="email" placeholder="you@example.com" />
+      <button id="btnMagicLink" class="btn-hear">Email me a magic link</button>
+      <div class="auth-divider">or</div>
+      <button id="btnGoogle" class="btn-hear">Continue with Google</button>
+      <p id="authStatus"></p>
+    </div>
+  </div>
+
   <!-- Toast notifications -->
   <div id="toast"></div>
 
@@ -1336,6 +1395,78 @@
     let ttsCtx = null; // shared AudioContext for TTS — created on first user gesture
     let sessionPcm = [];     // array of Float32Array chunks for the whole session
     let sessionPcmRate = 0;  // sample rate of the captured audio
+
+    // ── Auth (Supabase) ────────────────────────────────────────────────────────
+    let supabaseClient = null;
+    let authToken = null;
+    let userTier = 'anonymous';
+    const browserMarker = (() => {
+      let m = localStorage.getItem('speakero_marker');
+      if (!m) { m = crypto.randomUUID(); localStorage.setItem('speakero_marker', m); }
+      return m;
+    })();
+
+    function authHeaders() {
+      return authToken ? { 'Authorization': 'Bearer ' + authToken } : {};
+    }
+
+    function applyAuthSession(session) {
+      authToken = session ? session.access_token : null;
+      userTier = session ? ((session.user.app_metadata || {}).tier || 'free') : 'anonymous';
+      const signin = document.getElementById('btnSignIn');
+      const chip = document.getElementById('userChip');
+      if (session) {
+        signin.style.display = 'none';
+        chip.style.display = 'flex';
+        document.getElementById('userEmail').textContent = session.user.email || '';
+      } else {
+        signin.style.display = '';
+        chip.style.display = 'none';
+      }
+      document.getElementById('proLengthWrap').style.display = userTier === 'pro' ? '' : 'none';
+    }
+
+    async function initAuth() {
+      try {
+        const cfg = await (await fetch('/api/config')).json();
+        if (!cfg.supabase_url || !cfg.supabase_anon_key) return; // anonymous-only mode
+        await new Promise((resolve, reject) => {
+          const s = document.createElement('script');
+          s.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
+          s.onload = resolve;
+          s.onerror = reject;
+          document.head.appendChild(s);
+        });
+        supabaseClient = window.supabase.createClient(cfg.supabase_url, cfg.supabase_anon_key);
+        supabaseClient.auth.onAuthStateChange((_event, session) => applyAuthSession(session));
+        const { data } = await supabaseClient.auth.getSession();
+        applyAuthSession(data.session);
+        document.getElementById('authArea').style.display = 'flex';
+      } catch (e) { console.warn('[auth] init failed:', e); }
+    }
+    initAuth();
+
+    function openAuthModal(pitch) {
+      if (!supabaseClient) { showToast('Sign-in is not configured on this server.'); return; }
+      if (pitch) document.getElementById('authPitch').textContent = pitch;
+      document.getElementById('authModal').classList.add('open');
+    }
+    document.getElementById('btnSignIn').addEventListener('click', () => openAuthModal());
+    document.getElementById('btnCloseAuth').addEventListener('click', () =>
+      document.getElementById('authModal').classList.remove('open'));
+    document.getElementById('btnMagicLink').addEventListener('click', async () => {
+      const email = document.getElementById('authEmail').value.trim();
+      if (!email) return;
+      const { error } = await supabaseClient.auth.signInWithOtp({ email });
+      document.getElementById('authStatus').textContent =
+        error ? 'Could not send link: ' + error.message : 'Check your email for the sign-in link.';
+    });
+    document.getElementById('btnGoogle').addEventListener('click', async () => {
+      await supabaseClient.auth.signInWithOAuth({ provider: 'google' });
+    });
+    document.getElementById('btnSignOut').addEventListener('click', async () => {
+      await supabaseClient.auth.signOut();
+    });
     let transcriptCleared = false;
     let sessionMode = 'individual';
 
@@ -1364,7 +1495,7 @@
     });
 
     // ── Socket.IO ──────────────────────────────────────────────────────────────
-    const socket = io({ transports: ['websocket', 'polling'] });
+    const socket = io({ transports: ['websocket', 'polling'], auth: (cb) => cb({ token: authToken }) });
 
     // Disable Start until the socket handshake completes and we have a stable sid
     document.getElementById('btnStart').disabled = true;
@@ -1400,6 +1531,22 @@
           flashFillerCard();
           playFillerBeep();
           break;
+        case 'session_limit': {
+          sessionActive = false;
+          stopAudioCapture();
+          stopTimer();
+          setVisualizerActive(false);
+          document.getElementById('btnStart').disabled = false;
+          document.getElementById('btnStart').classList.add('pulsing');
+          document.getElementById('btnStop').disabled = true;
+          setStatus('Session limit reached');
+          if (!authToken) {
+            openAuthModal('Time is up for this free session. Sign in to save your sessions and keep practicing.');
+          } else {
+            showToast('Session limit reached. Your debrief is ready to generate.');
+          }
+          break;
+        }
         case 'filler_streak':
           showStreakAlert();
           break;
@@ -1620,12 +1767,15 @@
     }
 
     // ── Timer ──────────────────────────────────────────────────────────────────
+    let sessionMaxSeconds = 0;
     function startTimer() {
       timerSeconds = 0;
       timerInterval = setInterval(() => {
         timerSeconds++;
-        const m = String(Math.floor(timerSeconds / 60)).padStart(2, '0');
-        const s = String(timerSeconds % 60).padStart(2, '0');
+        // Count down from the tier limit when one exists
+        const shown = sessionMaxSeconds > 0 ? Math.max(0, sessionMaxSeconds - timerSeconds) : timerSeconds;
+        const m = String(Math.floor(shown / 60)).padStart(2, '0');
+        const s = String(shown % 60).padStart(2, '0');
         document.getElementById('timer').textContent = `${m}:${s}`;
       }, 1000);
     }
@@ -1651,8 +1801,8 @@
 
         const res = await fetch('/api/speak', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ text }),
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ text, sid: socket.id }),
         });
         if (!res.ok) {
           console.warn('[tts] /api/speak returned', res.status);
@@ -1745,15 +1895,26 @@
     // ── Session start ──────────────────────────────────────────────────────────
     document.getElementById('btnStart').addEventListener('click', async () => {
       try {
-        await fetch('/api/start', {
+        const startRes = await fetch('/api/start', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify({
             sid: socket.id,
             mode: sessionMode,
             topic: document.getElementById('topicInput').value.trim(),
+            marker: browserMarker,
+            requested_minutes: userTier === 'pro'
+              ? parseInt(document.getElementById('proMinutes').value, 10)
+              : null,
           }),
         });
+        const startBody = await startRes.json();
+        if (!startRes.ok) {
+          showToast(startBody.reason || 'Could not start session.');
+          if (!authToken) openAuthModal(startBody.reason);
+          return;
+        }
+        sessionMaxSeconds = (startBody.max_minutes || 0) * 60;
         // Prime TTS AudioContext during user gesture so it's unlocked for socket-triggered nudges
         if (!ttsCtx) ttsCtx = new AudioContext();
 
@@ -1797,7 +1958,7 @@
       setVisualizerActive(false);
       await fetch('/api/stop', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ sid: socket.id }),
       });
 
@@ -1820,7 +1981,7 @@
         setVisualizerActive(false);
         await fetch('/api/stop', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify({ sid: socket.id }),
         });
         document.getElementById('btnStop').disabled = true;
@@ -1842,7 +2003,7 @@
       try {
         const res = await fetch('/api/report', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
           body: JSON.stringify({ sid: socket.id, topic }),
         });
         const data = await res.json();
