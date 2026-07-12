@@ -76,9 +76,18 @@ class SessionState:
 
 SESSIONS: dict[str, SessionState] = {}
 
+_anthropic_client: anthropic.AsyncAnthropic | None = None
+
+
+def _get_anthropic() -> anthropic.AsyncAnthropic:
+    global _anthropic_client
+    if _anthropic_client is None:
+        _anthropic_client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY, timeout=10.0)
+    return _anthropic_client
+
 
 async def _get_nudge_from_claude(transcript_snippet: str, sess: SessionState) -> str:
-    client = anthropic.AsyncAnthropic(api_key=ANTHROPIC_API_KEY)
+    client = _get_anthropic()
 
     if sess.mode == "panel":
         mode_instruction = (
@@ -107,7 +116,7 @@ async def _get_nudge_from_claude(transcript_snippet: str, sess: SessionState) ->
         )
 
     message = await client.messages.create(
-        model="claude-sonnet-4-6",
+        model="claude-haiku-4-5",
         max_tokens=64,
         messages=[
             {
@@ -121,6 +130,9 @@ async def _get_nudge_from_claude(transcript_snippet: str, sess: SessionState) ->
             }
         ],
     )
+    sess.usage["input_tokens"] += message.usage.input_tokens
+    sess.usage["output_tokens"] += message.usage.output_tokens
+    sess.usage["llm_calls"] += 1
     return message.content[0].text.strip()
 
 
@@ -289,7 +301,9 @@ async def api_report(request: Request):
             mode=mode,
             highlight_window=highlight_window,
             candidate_windows=sess.detector.get_replay_candidates(),
+            usage_sink=sess.usage,
         )
+        report["filler_breakdown"] = stats.get("fillerBreakdown", {})
         report["replay"] = sess.detector.get_replay_windows(
             roughest_index=report.pop("roughest_window_index", None)
         )
