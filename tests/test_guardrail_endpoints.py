@@ -141,3 +141,37 @@ def test_report_memoized(monkeypatch):
     assert calls["n"] == 1
     assert first == second
     main.SESSIONS.pop("s-memo", None)
+
+
+import asyncio  # noqa: E402
+
+import tts  # noqa: E402
+
+
+def test_tts_cache_hits(monkeypatch):
+    tts._cache.clear()
+    calls = {"n": 0}
+
+    class FakeResp:
+        status_code = 200
+        content = b"WAVDATA"
+
+    class FakeAsyncClient:
+        def __init__(self, timeout=None):
+            pass
+
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *a):
+            return False
+
+        async def post(self, *a, **k):
+            calls["n"] += 1
+            return FakeResp()
+
+    monkeypatch.setattr(tts.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setenv("SMALLEST_API_KEY", "k")
+    assert asyncio.run(tts.speak("hello")) == b"WAVDATA"
+    assert asyncio.run(tts.speak("hello")) == b"WAVDATA"
+    assert calls["n"] == 1
