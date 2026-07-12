@@ -4,6 +4,12 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Speakero — AI Speaking Coach</title>
+  <meta name="description" content="Real-time AI speaking coach: live filler-word detection, voice nudges, and a full debrief with replay of your own best and roughest moments." />
+  <meta name="theme-color" content="#020617" />
+  <meta property="og:title" content="Speakero — AI Speaking Coach" />
+  <meta property="og:description" content="Practice out loud. Get live coaching nudges, then replay your strongest and roughest moments in your own voice." />
+  <meta property="og:type" content="website" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%237c3aed'/%3E%3Cstop offset='1' stop-color='%23f43f5e'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='14' fill='%23020617'/%3E%3Crect x='26' y='10' width='12' height='26' rx='6' fill='url(%23g)'/%3E%3Cpath d='M18 30v3a14 14 0 0 0 28 0v-3' fill='none' stroke='url(%23g)' stroke-width='4' stroke-linecap='round'/%3E%3Cline x1='32' y1='47' x2='32' y2='54' stroke='url(%23g)' stroke-width='4' stroke-linecap='round'/%3E%3C/svg%3E" />
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&family=Manrope:wght@400;600;700;800&family=Inter:wght@400;500;600&display=swap" rel="stylesheet" />
@@ -117,6 +123,89 @@
       color: #fff;
       flex-shrink: 0;
       cursor: pointer;
+      border: none;
+      transition: transform 0.15s, box-shadow 0.15s;
+    }
+    .avatar:hover { transform: scale(1.06); box-shadow: 0 0 0 3px rgba(124,58,237,0.35); }
+
+    /* ── HEADER MENUS (account + settings) ──────────────────────────────────── */
+    .header-right { position: relative; }
+    .header-menu {
+      position: absolute;
+      top: 46px;
+      right: 0;
+      min-width: 230px;
+      background: var(--surface-solid);
+      border: 1px solid var(--border-solid);
+      border-radius: 12px;
+      padding: 12px;
+      box-shadow: 0 12px 40px rgba(0,0,0,0.5);
+      font-family: 'Inter', sans-serif;
+      display: none;
+      z-index: 400;
+    }
+    .header-menu.open { display: block; animation: menuIn 0.14s ease-out; }
+    @keyframes menuIn { from { opacity: 0; transform: translateY(-4px); } to { opacity: 1; transform: none; } }
+    .menu-email { font-size: 0.82rem; color: var(--text); word-break: break-all; margin-bottom: 8px; }
+    .tier-badge {
+      display: inline-block;
+      font-size: 0.62rem;
+      font-weight: 700;
+      letter-spacing: 1.2px;
+      padding: 3px 10px;
+      border-radius: 999px;
+      background: rgba(148,163,184,0.15);
+      color: var(--slate-400);
+    }
+    .tier-badge.pro { background: rgba(124,58,237,0.25); color: var(--violet-light); }
+    .menu-divider { border-top: 1px solid rgba(51,65,85,0.5); margin: 10px 0; }
+    .menu-item {
+      display: block;
+      width: 100%;
+      text-align: left;
+      background: none;
+      border: none;
+      color: var(--text);
+      font-size: 0.85rem;
+      padding: 8px 10px;
+      border-radius: 8px;
+      cursor: pointer;
+    }
+    .menu-item:hover { background: rgba(51,65,85,0.4); }
+    .menu-heading {
+      font-size: 0.68rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 1.2px;
+      color: var(--muted);
+      margin-bottom: 8px;
+    }
+    .menu-hint { font-size: 0.72rem; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+    .segmented { display: flex; gap: 4px; background: rgba(2,6,23,0.5); border-radius: 8px; padding: 3px; }
+    .seg-btn {
+      flex: 1;
+      background: none;
+      border: none;
+      color: var(--slate-400);
+      font-size: 0.78rem;
+      padding: 6px 0;
+      border-radius: 6px;
+      cursor: pointer;
+    }
+    .seg-btn.selected { background: var(--violet); color: #fff; }
+    .menu-toggle-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 0.85rem;
+      color: var(--text);
+      padding: 2px 0;
+      cursor: pointer;
+    }
+    .menu-toggle-row input { accent-color: var(--violet); width: 16px; height: 16px; cursor: pointer; }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { animation: none !important; transition: none !important; }
     }
 
     /* ── MAIN WRAPPER ────────────────────────────────────────────────────────── */
@@ -557,19 +646,17 @@
     }
 
     /* ── FIXED CONTROL BAR ───────────────────────────────────────────────────── */
+    /* Lives inside the timer card (the empty hero real estate) instead of
+       floating over content. */
     .control-bar {
-      position: fixed;
-      bottom: 28px;
-      left: 50%;
-      transform: translateX(-50%);
-      z-index: 200;
       display: flex;
       align-items: center;
+      justify-content: center;
       gap: 16px;
+      width: fit-content;
+      margin: 20px auto 4px;
       padding: 10px 24px;
       background: rgba(30,41,59,0.8);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
       border: 1px solid rgba(71,85,105,0.4);
       border-radius: 9999px;
       box-shadow: 0 8px 32px rgba(0,0,0,0.4), 0 0 0 1px rgba(255,255,255,0.04);
@@ -1063,6 +1150,90 @@
     }
     #authStatus { min-height: 1em; color: var(--emerald); }
 
+    /* ── NOW PLAYING PILL ────────────────────────────────────────────────────── */
+    #playbackBar {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%) translateY(8px);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: var(--surface-solid);
+      border: 1px solid rgba(6,182,212,0.4);
+      color: var(--text);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.85rem;
+      padding: 8px 14px;
+      border-radius: 999px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.45);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.2s, transform 0.2s;
+      z-index: 250;
+    }
+    #playbackBar.show { opacity: 1; transform: translateX(-50%) translateY(0); pointer-events: auto; }
+    .pb-eq { display: flex; align-items: flex-end; gap: 2px; height: 14px; }
+    .pb-eq i {
+      width: 3px;
+      background: var(--cyan);
+      border-radius: 2px;
+      animation: eq 0.9s ease-in-out infinite;
+    }
+    .pb-eq i:nth-child(1) { animation-delay: 0s; }
+    .pb-eq i:nth-child(2) { animation-delay: 0.25s; }
+    .pb-eq i:nth-child(3) { animation-delay: 0.5s; }
+    @keyframes eq { 0%, 100% { height: 4px; } 50% { height: 14px; } }
+    #btnStopAudio {
+      background: rgba(6,182,212,0.15);
+      border: none;
+      color: var(--cyan);
+      width: 26px;
+      height: 26px;
+      border-radius: 50%;
+      cursor: pointer;
+      font-size: 0.7rem;
+      line-height: 1;
+    }
+    #btnStopAudio:hover { background: rgba(6,182,212,0.3); }
+
+    /* Active/loading state on any play button */
+    .btn-hear.playing, .btn-replay.playing {
+      box-shadow: 0 0 0 2px var(--cyan), 0 0 14px rgba(6,182,212,0.5);
+    }
+    .btn-hear.loading, .btn-replay.loading { opacity: 0.55; cursor: wait; }
+
+    /* ── PRO UPSELL (debrief moments card) ──────────────────────────────────── */
+    .pro-upsell {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      width: 100%;
+      margin-top: 14px;
+      padding: 11px 14px;
+      background: rgba(124,58,237,0.12);
+      border: 1px dashed rgba(139,92,246,0.5);
+      border-radius: 10px;
+      color: var(--slate-400);
+      font-family: 'Inter', sans-serif;
+      font-size: 0.85rem;
+      text-align: left;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .pro-upsell:hover { background: rgba(124,58,237,0.2); border-color: var(--violet-light); }
+    .pro-upsell-badge {
+      flex-shrink: 0;
+      font-size: 0.62rem;
+      font-weight: 800;
+      letter-spacing: 1.2px;
+      padding: 3px 8px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, var(--violet), var(--rose));
+      color: #fff;
+      font-family: 'Manrope', sans-serif;
+    }
+
     /* ── TOAST ───────────────────────────────────────────────────────────────── */
     #toast {
       position: fixed;
@@ -1119,15 +1290,37 @@
     <div class="header-right">
       <div id="authArea" style="display:none; align-items:center; gap:10px;">
         <button id="btnSignIn" class="btn-hear">Sign in</button>
-        <div id="userChip" style="display:none; align-items:center; gap:8px;">
-          <span id="userEmail" style="font-size:0.8rem; color:var(--slate-400); font-family:'Inter',sans-serif;"></span>
-          <button id="btnSignOut" class="btn-replay">Sign out</button>
+        <div id="userChip" style="display:none; align-items:center;">
+          <button id="userAvatar" class="avatar" title="Account">?</button>
         </div>
       </div>
-      <button class="icon-btn" title="Settings">
+      <button class="icon-btn" id="btnSettings" title="Settings">
         <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
       </button>
-      <div class="avatar" title="User">SP</div>
+
+      <!-- User account menu -->
+      <div id="userMenu" class="header-menu">
+        <div class="menu-email" id="userEmail"></div>
+        <div class="menu-tier"><span id="tierBadge" class="tier-badge">FREE</span></div>
+        <div class="menu-divider"></div>
+        <button id="btnSignOut" class="menu-item">Sign out</button>
+      </div>
+
+      <!-- Settings menu -->
+      <div id="settingsMenu" class="header-menu">
+        <div class="menu-heading">Voice nudges</div>
+        <div class="segmented" id="voiceNudgeSeg">
+          <button data-val="auto" class="seg-btn">Auto</button>
+          <button data-val="always" class="seg-btn">Always</button>
+          <button data-val="off" class="seg-btn">Off</button>
+        </div>
+        <div class="menu-hint">Auto waits for a pause in your speech before the coach talks.</div>
+        <div class="menu-divider"></div>
+        <label class="menu-toggle-row">
+          <span>Filler beep</span>
+          <input type="checkbox" id="fillerBeepToggle" checked />
+        </label>
+      </div>
     </div>
   </header>
 
@@ -1182,6 +1375,21 @@
             <div class="viz-bar"></div>
             <div class="viz-bar"></div>
             <div class="viz-bar"></div>
+          </div>
+
+          <!-- Controls: start / stop / debrief -->
+          <div class="control-bar">
+            <button class="btn-mic pulsing" id="btnStart" title="Start Session">
+              <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
+            </button>
+            <button class="btn-stop" id="btnStop" disabled title="Stop Session">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
+            </button>
+            <div class="control-divider"></div>
+            <button class="btn-debrief" id="btnReport" disabled>
+              <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10,9 9,9 8,9"/></svg>
+              End &amp; Debrief
+            </button>
           </div>
         </div>
 
@@ -1311,6 +1519,10 @@
               <button class="btn-hear" id="btnPlayExample">&#9654; Hear Example</button>
             </div>
           </div>
+          <button id="proUpsell" class="pro-upsell" style="display:none">
+            <span class="pro-upsell-badge">PRO</span>
+            Coming soon: hear this moment rewritten in your own voice.
+          </button>
         </div>
 
         <!-- Strengths + Improvements -->
@@ -1363,23 +1575,16 @@
     </div>
   </div>
 
+  <!-- Now-playing pill -->
+  <div id="playbackBar">
+    <span class="pb-eq"><i></i><i></i><i></i></span>
+    <span id="playbackLabel"></span>
+    <button id="btnStopAudio" title="Stop audio">&#9632;</button>
+  </div>
+
   <!-- Toast notifications -->
   <div id="toast"></div>
 
-  <!-- Fixed control bar -->
-  <div class="control-bar">
-    <button class="btn-mic pulsing" id="btnStart" title="Start Session">
-      <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a3 3 0 0 0-3 3v7a3 3 0 0 0 6 0V5a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/><line x1="8" y1="23" x2="16" y2="23"/></svg>
-    </button>
-    <button class="btn-stop" id="btnStop" disabled title="Stop Session">
-      <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="currentColor"><rect x="3" y="3" width="18" height="18" rx="2"/></svg>
-    </button>
-    <div class="control-divider"></div>
-    <button class="btn-debrief" id="btnReport" disabled>
-      <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14,2 14,8 20,8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/><polyline points="10,9 9,9 8,9"/></svg>
-      End &amp; Debrief
-    </button>
-  </div>
 
   <script>
     // ── State ──────────────────────────────────────────────────────────────────
@@ -1416,12 +1621,18 @@
       const signin = document.getElementById('btnSignIn');
       const chip = document.getElementById('userChip');
       if (session) {
+        const email = session.user.email || '';
         signin.style.display = 'none';
         chip.style.display = 'flex';
-        document.getElementById('userEmail').textContent = session.user.email || '';
+        document.getElementById('userAvatar').textContent = (email[0] || '?').toUpperCase();
+        document.getElementById('userEmail').textContent = email;
+        const badge = document.getElementById('tierBadge');
+        badge.textContent = userTier.toUpperCase();
+        badge.classList.toggle('pro', userTier === 'pro');
       } else {
         signin.style.display = '';
         chip.style.display = 'none';
+        document.getElementById('userMenu').classList.remove('open');
       }
       document.getElementById('proLengthWrap').style.display = userTier === 'pro' ? '' : 'none';
     }
@@ -1465,7 +1676,67 @@
       await supabaseClient.auth.signInWithOAuth({ provider: 'google' });
     });
     document.getElementById('btnSignOut').addEventListener('click', async () => {
+      closeHeaderMenus();
       await supabaseClient.auth.signOut();
+    });
+
+    // ── Settings (persisted in localStorage) ───────────────────────────────────
+    const settings = (() => {
+      const defaults = { voiceNudges: 'auto', fillerBeep: true };
+      try { return { ...defaults, ...JSON.parse(localStorage.getItem('speakero_settings') || '{}') }; }
+      catch (e) { return defaults; }
+    })();
+    function saveSettings() { localStorage.setItem('speakero_settings', JSON.stringify(settings)); }
+
+    function closeHeaderMenus() {
+      document.getElementById('userMenu').classList.remove('open');
+      document.getElementById('settingsMenu').classList.remove('open');
+    }
+    document.getElementById('btnSettings').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const menu = document.getElementById('settingsMenu');
+      const wasOpen = menu.classList.contains('open');
+      closeHeaderMenus();
+      if (!wasOpen) menu.classList.add('open');
+    });
+    document.getElementById('userAvatar').addEventListener('click', (e) => {
+      e.stopPropagation();
+      const menu = document.getElementById('userMenu');
+      const wasOpen = menu.classList.contains('open');
+      closeHeaderMenus();
+      if (!wasOpen) menu.classList.add('open');
+    });
+    document.addEventListener('click', (e) => {
+      if (!e.target.closest('.header-menu') && !e.target.closest('#btnSettings') && !e.target.closest('#userAvatar')) {
+        closeHeaderMenus();
+      }
+    });
+
+    function reflectVoiceNudgeSetting() {
+      document.querySelectorAll('#voiceNudgeSeg .seg-btn').forEach(b =>
+        b.classList.toggle('selected', b.dataset.val === settings.voiceNudges));
+    }
+    reflectVoiceNudgeSetting();
+    document.querySelectorAll('#voiceNudgeSeg .seg-btn').forEach(b =>
+      b.addEventListener('click', () => {
+        settings.voiceNudges = b.dataset.val;
+        saveSettings();
+        reflectVoiceNudgeSetting();
+      }));
+    const beepToggle = document.getElementById('fillerBeepToggle');
+    beepToggle.checked = settings.fillerBeep;
+    beepToggle.addEventListener('change', () => {
+      settings.fillerBeep = beepToggle.checked;
+      saveSettings();
+    });
+
+    // Pro upsell in the debrief moments card
+    document.getElementById('proUpsell').addEventListener('click', () => {
+      if (!authToken) {
+        openAuthModal('Pro members will hear their rough moments rewritten in their own voice. Sign in to be first in line.');
+      } else {
+        showToast('Pro is coming soon. You will be the first to know.');
+      }
     });
     let transcriptCleared = false;
     let sessionMode = 'individual';
@@ -1552,7 +1823,7 @@
           break;
         case 'nudge':
           showNudge(data.text);
-          playNudgeAudio(data.text);
+          queueNudgeAudio(data.text);
           break;
       }
     });
@@ -1695,6 +1966,7 @@
 
     // ── Beep ───────────────────────────────────────────────────────────────────
     function playFillerBeep() {
+      if (!settings.fillerBeep) return;
       try {
         const ctx = new AudioContext();
         const osc = ctx.createOscillator();
@@ -1792,33 +2064,97 @@
       });
     }
 
-    // ── TTS ────────────────────────────────────────────────────────────────────
-    async function playNudgeAudio(text) {
-      try {
-        // Reuse a single AudioContext — browsers block new ones without user gesture
-        if (!ttsCtx) ttsCtx = new AudioContext();
-        if (ttsCtx.state === 'suspended') await ttsCtx.resume();
+    // ── Audio playback manager ─────────────────────────────────────────────────
+    // One clip at a time: starting a new clip stops the current one, the active
+    // button toggles play/stop, and a "now playing" pill offers a stop control.
+    let currentAudio = null; // { src, btn }
+    let playReq = 0;
 
-        const res = await fetch('/api/speak', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', ...authHeaders() },
-          body: JSON.stringify({ text, sid: socket.id }),
-        });
-        if (!res.ok) {
-          console.warn('[tts] /api/speak returned', res.status);
-          showToast('Voice playback is unavailable right now. Text feedback still works.');
-          return;
-        }
-        const arrayBuffer = await res.arrayBuffer();
-        const decoded = await ttsCtx.decodeAudioData(arrayBuffer);
-        const src = ttsCtx.createBufferSource();
-        src.buffer = decoded;
-        src.connect(ttsCtx.destination);
-        src.start();
+    function setPlaybackUi(label, btn) {
+      const bar = document.getElementById('playbackBar');
+      document.querySelectorAll('.btn-hear.playing, .btn-replay.playing').forEach(b => b.classList.remove('playing'));
+      if (label) {
+        document.getElementById('playbackLabel').textContent = label;
+        bar.classList.add('show');
+        if (btn) btn.classList.add('playing');
+      } else {
+        bar.classList.remove('show');
+      }
+    }
+
+    function stopDebriefAudio() {
+      playReq++; // invalidate any clip still being fetched/decoded
+      if (currentAudio) {
+        try { currentAudio.src.onended = null; currentAudio.src.stop(); } catch (e) {}
+        currentAudio = null;
+      }
+      setPlaybackUi(null);
+    }
+
+    async function togglePlay(btn, label, makeSource) {
+      if (currentAudio && btn && currentAudio.btn === btn) { stopDebriefAudio(); return; }
+      stopDebriefAudio();
+      const req = playReq;
+      if (btn) btn.classList.add('loading');
+      let src = null;
+      try {
+        src = await makeSource();
       } catch (e) {
-        console.warn('[tts] Audio playback failed:', e);
+        console.warn('[audio] playback failed:', e);
         showToast('Voice playback is unavailable right now. Text feedback still works.');
       }
+      if (btn) btn.classList.remove('loading');
+      if (!src) return;
+      if (req !== playReq) { try { src.disconnect(); } catch (e) {} return; } // superseded by a newer click
+      currentAudio = { src, btn };
+      setPlaybackUi(label, btn);
+      src.onended = () => { currentAudio = null; setPlaybackUi(null); };
+      src.start();
+    }
+
+    async function makeTtsSource(text) {
+      // Reuse a single AudioContext — browsers block new ones without user gesture
+      if (!ttsCtx) ttsCtx = new AudioContext();
+      if (ttsCtx.state === 'suspended') await ttsCtx.resume();
+      const res = await fetch('/api/speak', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', ...authHeaders() },
+        body: JSON.stringify({ text, sid: socket.id }),
+      });
+      if (!res.ok) throw new Error('/api/speak returned ' + res.status);
+      const decoded = await ttsCtx.decodeAudioData(await res.arrayBuffer());
+      const src = ttsCtx.createBufferSource();
+      src.buffer = decoded;
+      src.connect(ttsCtx.destination);
+      return src;
+    }
+
+    function playNudgeAudio(text, label, btn) {
+      togglePlay(btn || null, label || 'Coach feedback', () => makeTtsSource(text));
+    }
+    document.getElementById('btnStopAudio').addEventListener('click', stopDebriefAudio);
+
+    // Pause-aware voice nudges: the banner shows immediately, but the coach's
+    // voice waits for a gap in your speech instead of talking over you.
+    let lastLoudAt = 0;
+    let pendingNudgeTimer = null;
+    function queueNudgeAudio(text) {
+      if (settings.voiceNudges === 'off') return;
+      if (settings.voiceNudges === 'always' || !sessionActive) {
+        playNudgeAudio(text, 'Coach nudge');
+        return;
+      }
+      const deadline = Date.now() + 12000; // give up quietly; the banner already delivered it
+      clearInterval(pendingNudgeTimer);
+      pendingNudgeTimer = setInterval(() => {
+        if (!sessionActive) { clearInterval(pendingNudgeTimer); return; }
+        if (Date.now() - lastLoudAt > 1200) {
+          clearInterval(pendingNudgeTimer);
+          playNudgeAudio(text, 'Coach nudge');
+        } else if (Date.now() > deadline) {
+          clearInterval(pendingNudgeTimer);
+        }
+      }, 250);
     }
 
     // ── Audio capture ──────────────────────────────────────────────────────────
@@ -1837,6 +2173,7 @@
         let sumSq = 0;
         for (let i = 0; i < float32.length; i++) sumSq += float32[i] * float32[i];
         const rms = Math.sqrt(sumSq / float32.length);
+        if (rms > 0.03) lastLoudAt = Date.now(); // speech activity, for pause-aware nudges
         updateEnergyBar(rms);
 
         sessionPcm.push(new Float32Array(float32));
@@ -1918,6 +2255,7 @@
         // Prime TTS AudioContext during user gesture so it's unlocked for socket-triggered nudges
         if (!ttsCtx) ttsCtx = new AudioContext();
 
+        stopDebriefAudio();
         sessionPcm = [];
         sessionPcmRate = 0;
         await startAudioCapture();
@@ -1946,7 +2284,7 @@
         startTimer();
         setStatus('Streaming…', true);
       } catch (e) {
-        alert('Could not start session: ' + e.message);
+        showToast('Could not start the session: ' + e.message + '. Check mic permissions and try again.');
       }
     });
 
@@ -2009,7 +2347,7 @@
         const data = await res.json();
         renderDebrief(data);
       } catch (e) {
-        alert('Failed to generate report: ' + e.message);
+        showToast('Could not generate the debrief: ' + e.message + '. Your session is still live, try again.');
       } finally {
         document.getElementById('reportLoading').style.display = 'none';
         document.getElementById('btnReport').disabled = false;
@@ -2022,6 +2360,7 @@
     });
 
     document.getElementById('btnCloseDebrief').addEventListener('click', () => {
+      stopDebriefAudio();
       document.getElementById('debriefSection').classList.remove('open');
     });
 
@@ -2055,13 +2394,13 @@
       }
     }
 
-    function playPcmRange(startSec, endSec) {
-      if (!sessionPcm.length || !sessionPcmRate) return;
+    function makePcmSource(startSec, endSec) {
+      if (!sessionPcm.length || !sessionPcmRate) return null;
       const total = sessionPcm.reduce((n, c) => n + c.length, 0);
       const from = Math.min(Math.max(0, Math.floor(startSec * sessionPcmRate)), total);
       const to = Math.min(Math.max(from, Math.floor(endSec * sessionPcmRate)), total);
       const length = to - from;
-      if (length <= 0) return;
+      if (length <= 0) return null;
 
       const out = new Float32Array(length);
       let pos = 0, copied = 0;
@@ -2084,7 +2423,7 @@
       const src = ttsCtx.createBufferSource();
       src.buffer = buf;
       src.connect(ttsCtx.destination);
-      src.start();
+      return src;
     }
 
     function renderDebrief(data) {
@@ -2151,8 +2490,9 @@
       if (spokenText) {
         document.getElementById('spokenFeedbackText').textContent = spokenText;
         sfBar.style.display = 'flex';
-        playNudgeAudio(spokenText);
-        document.getElementById('btnReplayFeedback').onclick = () => playNudgeAudio(spokenText);
+        const replayBtn = document.getElementById('btnReplayFeedback');
+        playNudgeAudio(spokenText, 'Spoken feedback', replayBtn);
+        replayBtn.onclick = () => playNudgeAudio(spokenText, 'Spoken feedback', replayBtn);
       } else {
         sfBar.style.display = 'none';
       }
@@ -2172,7 +2512,7 @@
       document.getElementById('highlightMomentText').textContent = highlightText;
       if (haveAudio && best) {
         bestBtn.style.display = '';
-        bestBtn.onclick = () => playPcmRange(best.start, best.end);
+        bestBtn.onclick = () => togglePlay(bestBtn, 'Your strongest moment', () => makePcmSource(best.start, best.end));
       } else {
         bestBtn.style.display = 'none';
       }
@@ -2183,7 +2523,7 @@
       document.getElementById('worstMomentText').textContent = (worst && worst.text) || '';
       if (haveAudio && worst) {
         worstBtn.style.display = '';
-        worstBtn.onclick = () => playPcmRange(worst.start, worst.end);
+        worstBtn.onclick = () => togglePlay(worstBtn, 'Your roughest moment', () => makePcmSource(worst.start, worst.end));
       } else {
         worstBtn.style.display = 'none';
       }
@@ -2191,7 +2531,8 @@
       if (extract) {
         document.getElementById('exampleExtractText').textContent = extract;
         fixBlock.style.display = '';
-        document.getElementById('btnPlayExample').onclick = () => playNudgeAudio(extract);
+        const exBtn = document.getElementById('btnPlayExample');
+        exBtn.onclick = () => playNudgeAudio(extract, 'How it could sound', exBtn);
       } else {
         fixBlock.style.display = 'none';
       }
@@ -2199,6 +2540,8 @@
       document.getElementById('worstMoment').style.display = showWorst ? '' : 'none';
 
       document.getElementById('momentsBlock').style.display = (showBest || showWorst) ? 'block' : 'none';
+      document.getElementById('proUpsell').style.display =
+        (showBest || showWorst) && userTier !== 'pro' ? '' : 'none';
 
       const ds = document.getElementById('debriefSection');
       ds.classList.add('open');
