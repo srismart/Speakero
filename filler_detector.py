@@ -32,7 +32,7 @@ class FillerDetector:
         self._filler_timestamps = []
         self._word_windows = []
 
-    def process_words(self, words: List[Dict[str, Any]]) -> Dict[str, Any]:
+    def process_words(self, words: List[Dict[str, Any]], epoch: int = 0) -> Dict[str, Any]:
         new_fillers: List[str] = []
         new_pauses: int = 0
         chunk_words: List[str] = []
@@ -42,7 +42,9 @@ class FillerDetector:
         i = 0
         while i < len(words):
             word_obj = words[i]
-            word = word_obj.get("word", "").lower().strip(".,!?;:")
+            # Pulse tokens can carry leading/trailing whitespace (chunk-initial
+            # words arrive as e.g. " um") — strip it before punctuation.
+            word = word_obj.get("word", "").strip().lower().strip(".,!?;:")
             start = word_obj.get("start", 0.0)
             end = word_obj.get("end", start)
 
@@ -53,7 +55,7 @@ class FillerDetector:
                     new_pauses += 1
 
             if i + 1 < len(words):
-                next_word = words[i + 1].get("word", "").lower().strip(".,!?;:")
+                next_word = words[i + 1].get("word", "").strip().lower().strip(".,!?;:")
                 phrase = f"{word} {next_word}"
                 if phrase in FILLER_PHRASES:
                     now = time.time()
@@ -98,6 +100,9 @@ class FillerDetector:
                 "words": list(chunk_words),
                 "audio_start": min(starts) if starts else 0.0,
                 "audio_end": max(ends) if ends else 0.0,
+                # Pulse timestamps reset to 0 on every stream (re)connect; the
+                # epoch lets the client offset into its continuous PCM buffer.
+                "epoch": epoch,
             })
 
         # Streak detection: count fillers in the last STREAK_WINDOW_SECONDS
@@ -145,7 +150,8 @@ class FillerDetector:
         if len(best["words"]) == 0:
             # Only all-filler windows exist — none is a real "best" delivery.
             return None
-        return {"text": best["text"], "start": best["audio_start"], "end": best["audio_end"]}
+        return {"text": best["text"], "start": best["audio_start"], "end": best["audio_end"],
+                "epoch": best.get("epoch", 0)}
 
     def get_worst_window(self) -> dict | None:
         """Return the roughest window: highest filler density.
@@ -166,7 +172,8 @@ class FillerDetector:
             return len(w["fillers"]) / total if total else 0.0
 
         worst = max(eligible, key=density)
-        return {"text": worst["text"], "start": worst["audio_start"], "end": worst["audio_end"]}
+        return {"text": worst["text"], "start": worst["audio_start"], "end": worst["audio_end"],
+                "epoch": worst.get("epoch", 0)}
 
     def get_replay_candidates(self) -> List[dict]:
         """Indexed list of replay-eligible windows (real audio span + has words),
@@ -186,7 +193,8 @@ class FillerDetector:
         w = self._word_windows[index]
         if w["audio_end"] <= w["audio_start"] or len(w["words"]) == 0:
             return None
-        return {"text": w["text"], "start": w["audio_start"], "end": w["audio_end"]}
+        return {"text": w["text"], "start": w["audio_start"], "end": w["audio_end"],
+                "epoch": w.get("epoch", 0)}
 
     def get_replay_windows(self, roughest_index: Optional[int] = None) -> dict:
         """Return {"best": window|None, "worst": window|None} for audio replay.
@@ -211,7 +219,8 @@ class FillerDetector:
             worst = self.get_worst_window()
         worst = worst if valid(worst) else None
 
-        if best and worst and best["start"] == worst["start"] and best["end"] == worst["end"]:
+        if (best and worst and best["start"] == worst["start"]
+                and best["end"] == worst["end"] and best.get("epoch") == worst.get("epoch")):
             worst = None
 
         return {"best": best, "worst": worst}

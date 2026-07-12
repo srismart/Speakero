@@ -1118,6 +1118,7 @@
 
     .replay-row { display: flex; align-items: center; gap: 12px; margin-top: 10px; flex-wrap: wrap; }
     .replay-text { font-size: 0.9rem; opacity: 0.85; }
+    .transcript-pending { opacity: 0.45; font-style: italic; }
 
     /* ── AUTH MODAL ──────────────────────────────────────────────────────────── */
     #authModal {
@@ -1521,7 +1522,7 @@
           </div>
           <button id="proUpsell" class="pro-upsell" style="display:none">
             <span class="pro-upsell-badge">PRO</span>
-            Coming soon: hear this moment rewritten in your own voice.
+            Replay this moment in your own voice, polished — coming to Pro.
           </button>
         </div>
 
@@ -1537,6 +1538,12 @@
           </div>
         </div>
 
+        <!-- Content feedback — expanded, alongside the coaching lists -->
+        <details class="debrief-block" id="contentDetails" open>
+          <summary><h3>Content Feedback</h3></summary>
+          <ul id="contentList"></ul>
+        </details>
+
         <!-- Filler breakdown -->
         <div class="debrief-block">
           <h3>Filler Breakdown</h3>
@@ -1550,12 +1557,6 @@
           <div class="chips-row" id="jargonChips"></div>
           <div class="completion-line" id="sentenceCompletion"></div>
         </div>
-
-        <!-- Content feedback — collapsed by default -->
-        <details class="debrief-block" id="contentDetails">
-          <summary><h3>Content Feedback</h3></summary>
-          <ul id="contentList"></ul>
-        </details>
       </div>
     </div>
 
@@ -1600,6 +1601,7 @@
     let ttsCtx = null; // shared AudioContext for TTS — created on first user gesture
     let sessionPcm = [];     // array of Float32Array chunks for the whole session
     let sessionPcmRate = 0;  // sample rate of the captured audio
+    let epochSampleOffsets = []; // buffered-sample count at each audio-WS (re)connect
 
     // ── Auth (Supabase) ────────────────────────────────────────────────────────
     let supabaseClient = null;
@@ -1992,16 +1994,37 @@
     }
 
     // ── Transcript ─────────────────────────────────────────────────────────────
+    let pendingEl = null; // interim (not-yet-final) text, replaced in place
     function appendTranscript(text, isFinal) {
       const el = document.getElementById('transcript');
       if (!transcriptCleared) {
-        el.innerHTML = '';
+        el.replaceChildren();
         transcriptCleared = true;
         cursorEl = null;
+        pendingEl = null;
       }
 
       // Remove existing cursor before adding content
       if (cursorEl && cursorEl.parentNode) cursorEl.parentNode.removeChild(cursorEl);
+
+      // Interim text is provisional: show it muted and REPLACE it on the next
+      // message instead of appending (fixes duplicated phrases and inflated
+      // word counts).
+      if (!isFinal) {
+        if (!pendingEl || !pendingEl.parentNode) {
+          pendingEl = document.createElement('span');
+          pendingEl.className = 'transcript-pending';
+          el.appendChild(pendingEl);
+        }
+        pendingEl.textContent = text.trim() + ' ';
+        cursorEl = document.createElement('span');
+        cursorEl.className = 'transcript-cursor';
+        el.appendChild(cursorEl);
+        el.scrollTop = el.scrollHeight;
+        return;
+      }
+      if (pendingEl && pendingEl.parentNode) pendingEl.parentNode.removeChild(pendingEl);
+      pendingEl = null;
 
       const words = text.trim().split(/\s+/);
       const fillerWords = new Set(['um','uh','er','ah','like','you know','basically','literally','actually','right','so','well','okay','ok','hmm','uhh','umm']);
@@ -2193,7 +2216,12 @@
       const wsProto = location.protocol === 'https:' ? 'wss' : 'ws';
       audioWs = new WebSocket(`${wsProto}://${location.host}/ws/audio?sample_rate=${audioContext.sampleRate}&sid=${socket.id}`);
       audioWs.binaryType = 'arraybuffer';
-      audioWs.onopen = () => setStatus('Streaming…', true);
+      audioWs.onopen = () => {
+        // New Pulse stream: its timestamps restart at 0 from this point in
+        // the local PCM buffer.
+        epochSampleOffsets.push(sessionPcm.reduce((n, c) => n + c.length, 0));
+        setStatus('Streaming…', true);
+      };
       audioWs.onclose = () => {
         if (sessionActive) {
           setStatus('Reconnecting…');
@@ -2258,6 +2286,7 @@
         stopDebriefAudio();
         sessionPcm = [];
         sessionPcmRate = 0;
+        epochSampleOffsets = [];
         await startAudioCapture();
 
         sessionActive = true;
@@ -2394,11 +2423,14 @@
       }
     }
 
-    function makePcmSource(startSec, endSec) {
+    function makePcmSource(startSec, endSec, epoch) {
       if (!sessionPcm.length || !sessionPcmRate) return null;
       const total = sessionPcm.reduce((n, c) => n + c.length, 0);
-      const from = Math.min(Math.max(0, Math.floor(startSec * sessionPcmRate)), total);
-      const to = Math.min(Math.max(from, Math.floor(endSec * sessionPcmRate)), total);
+      // Pulse timestamps are relative to their stream; offset into the
+      // continuous local buffer using where that stream (re)connected.
+      const base = epochSampleOffsets[epoch || 0] || 0;
+      const from = Math.min(Math.max(0, base + Math.floor(startSec * sessionPcmRate)), total);
+      const to = Math.min(Math.max(from, base + Math.floor(endSec * sessionPcmRate)), total);
       const length = to - from;
       if (length <= 0) return null;
 
@@ -2437,7 +2469,7 @@
       renderList('contentList', content, 'improve-item');
       const contentDetails = document.getElementById('contentDetails');
       contentDetails.style.display = content.length ? '' : 'none';
-      contentDetails.open = false;
+      contentDetails.open = true;
 
       // Filler breakdown chips
       const chips = document.getElementById('fillerChips');
@@ -2512,7 +2544,7 @@
       document.getElementById('highlightMomentText').textContent = highlightText;
       if (haveAudio && best) {
         bestBtn.style.display = '';
-        bestBtn.onclick = () => togglePlay(bestBtn, 'Your strongest moment', () => makePcmSource(best.start, best.end));
+        bestBtn.onclick = () => togglePlay(bestBtn, 'Your strongest moment', () => makePcmSource(best.start, best.end, best.epoch));
       } else {
         bestBtn.style.display = 'none';
       }
@@ -2523,7 +2555,7 @@
       document.getElementById('worstMomentText').textContent = (worst && worst.text) || '';
       if (haveAudio && worst) {
         worstBtn.style.display = '';
-        worstBtn.onclick = () => togglePlay(worstBtn, 'Your roughest moment', () => makePcmSource(worst.start, worst.end));
+        worstBtn.onclick = () => togglePlay(worstBtn, 'Your roughest moment', () => makePcmSource(worst.start, worst.end, worst.epoch));
       } else {
         worstBtn.style.display = 'none';
       }
