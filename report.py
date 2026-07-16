@@ -37,11 +37,28 @@ REPORT_SCHEMA = {
         "jargon_flags": _str_array(),
         "sentence_completion_rate": {"type": "string"},
         "highlight_moment": {"type": "string"},
+        "content_score": {"type": "integer"},
+        "verdict": {"type": "string"},
+        # Direction-only drivers: an LLM judgment does not warrant fake-precision
+        # numeric deltas, unlike the deterministic delivery drivers in scoring.py.
+        "content_drivers": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string"},
+                    "positive": {"type": "boolean"},
+                },
+                "required": ["label", "positive"],
+                "additionalProperties": False,
+            },
+        },
     },
     "required": [
         "roughest_window_index", "topic_identified", "strengths", "improvements",
         "content_feedback", "summary", "spoken_feedback", "example_extract",
         "repetition_flags", "jargon_flags", "sentence_completion_rate", "highlight_moment",
+        "content_score", "verdict", "content_drivers",
     ],
     "additionalProperties": False,
 }
@@ -143,6 +160,13 @@ Field guidance:
 - sentence_completion_rate: like "Good - most sentences were completed" or "Needs work - several abandoned thoughts".
 - highlight_moment: comment on the best delivery window, or empty string if none was provided.
 - roughest_window_index: integer index from the candidate list, or -1.
+- content_score: 0-100 judging CONTENT ONLY (structure, relevance, clarity of ideas,
+  persuasiveness) - not delivery mechanics like fillers or pace, which are scored
+  separately. Anchors: 85+ compelling and well-structured, 70-84 solid with gaps,
+  50-69 unfocused or thin, below 50 hard to follow. Score the substance, not the polish.
+- verdict: one plain-language sentence (max 18 words) summing up the session overall.
+- content_drivers: 2-4 short factors behind the content score, each {{label (max 5
+  words), positive (true if it helped, false if it hurt)}}.
 Be specific, actionable, and encouraging. Base your analysis strictly on the data provided."""
 
     client = _get_client()
@@ -166,5 +190,13 @@ Be specific, actionable, and encouraging. Base your analysis strictly on the dat
     except (TypeError, ValueError):
         idx = None
     report["roughest_window_index"] = idx if idx is not None and idx >= 0 else None
+
+    # Clamp the LLM-judged content score into 0-100; None if unusable.
+    score = report.get("content_score")
+    try:
+        score = max(0, min(100, int(score)))
+    except (TypeError, ValueError):
+        score = None
+    report["content_score"] = score
 
     return report
