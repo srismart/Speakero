@@ -1,8 +1,5 @@
 # Speakero — Real-time AI Speaking Coach
 
-> Built at **Voice AI HackSprint 2.0** · March 14, 2025 · San Francisco, CA
-> https://lu.ma/ikzcmqld
-
 **Speakero** is a real-time AI speaking coach that listens as you speak, catches filler words the moment they happen, measures your pace and pauses, delivers live coaching nudges via voice, and generates a full Claude-powered debrief at the end of your session.
 
 ---
@@ -128,7 +125,7 @@ Auth, tier limits, and the admin console are configured in Supabase — see
 
 **Sriram Santhanam**
 
-Built for [Voice AI HackSprint 2.0](https://lu.ma/ikzcmqld) — March 14, 2025, San Francisco, CA
+Origin: prototyped at Voice AI HackSprint 2.0 (March 2025); the original version is preserved at the `v0.1-hacksprint` tag.
 
 ---
 

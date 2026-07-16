@@ -10,7 +10,7 @@ Use this document to resume development after any interruption. Update "Current 
 
 ## Project Summary
 
-**Speakero** is a real-time AI speaking coach (runner-up, Voice AI HackSprint 2.0, SF).
+**Speakero** is a real-time AI speaking coach.
 It captures mic audio, detects filler words live, sends Claude-powered coaching nudges via TTS every 30s, and generates a full end-of-session debrief. Now multi-tenant and deployable as a single container.
 
 ---
