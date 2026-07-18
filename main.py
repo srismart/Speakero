@@ -18,6 +18,7 @@ from tts import speak
 from report import generate_report
 from auth import verify_token
 import limits
+import scoring
 
 load_dotenv()
 
@@ -306,6 +307,13 @@ async def api_report(request: Request):
             usage_sink=sess.usage,
         )
         report["filler_breakdown"] = stats.get("fillerBreakdown", {})
+        report["delivery"] = scoring.compute_delivery(
+            filler_count=stats.get("fillerCount", 0),
+            total_words=sess.detector.total_words,
+            wpm=stats.get("wpm", 0),
+            pause_count=stats.get("pauseCount", 0),
+            duration_seconds=sess.elapsed_seconds(),
+        )
         report["replay"] = sess.detector.get_replay_windows(
             roughest_index=report.pop("roughest_window_index", None)
         )

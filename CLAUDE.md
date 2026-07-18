@@ -4,8 +4,8 @@
 
 Real-time AI speaking coach. Detects filler words live, delivers
 Claude-powered voice nudges every 30s, generates full debrief at end.
-Runner-up at Voice AI HackSprint 2.0, SF. Now being developed into
-a monetizable product.
+Being developed into a monetizable product (original hackathon
+prototype preserved at tag v0.1-hacksprint).
 
 ## Stack
 

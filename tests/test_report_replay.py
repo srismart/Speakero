@@ -29,6 +29,45 @@ def test_report_includes_replay(monkeypatch):
     assert body["replay"]["best"]["end"] == 1.6
 
 
+def test_report_delivery_none_for_small_sample(monkeypatch):
+    async def fake_report(*args, **kwargs):
+        return {"summary": "ok"}
+
+    monkeypatch.setattr(main, "generate_report", fake_report)
+
+    sess = main.SessionState()
+    sess.start()
+    sess.detector.process_words([
+        {"word": "we", "start": 0.0, "end": 0.3},
+        {"word": "ship", "start": 0.3, "end": 0.7},
+    ])
+    main.SESSIONS["delivsmall"] = sess
+
+    client = TestClient(main.fastapi_app)
+    body = client.post("/api/report", json={"sid": "delivsmall"}).json()
+    assert body["delivery"] is None  # under the 20-word scoring floor
+
+
+def test_report_delivery_scored_for_real_sample(monkeypatch):
+    async def fake_report(*args, **kwargs):
+        return {"summary": "ok"}
+
+    monkeypatch.setattr(main, "generate_report", fake_report)
+
+    sess = main.SessionState()
+    sess.start()
+    words = [{"word": f"w{i}", "start": i * 0.4, "end": i * 0.4 + 0.3}
+             for i in range(25)]
+    sess.detector.process_words(words)
+    main.SESSIONS["delivbig"] = sess
+
+    client = TestClient(main.fastapi_app)
+    body = client.post("/api/report", json={"sid": "delivbig"}).json()
+    assert isinstance(body["delivery"]["score"], int)
+    assert 0 <= body["delivery"]["score"] <= 100
+    assert all("label" in d and "delta" in d for d in body["delivery"]["drivers"])
+
+
 def test_report_passes_candidates_and_uses_claude_roughest_pick(monkeypatch):
     seen = {}
 

@@ -32,6 +32,28 @@ def test_structured_output_request_and_usage_sink(monkeypatch):
     assert usage == {"input_tokens": 100, "output_tokens": 50, "llm_calls": 1}
 
 
+def test_schema_includes_content_score_fields():
+    props = report.REPORT_SCHEMA["properties"]
+    assert props["content_score"]["type"] == "integer"
+    assert props["verdict"]["type"] == "string"
+    drivers = props["content_drivers"]
+    assert drivers["type"] == "array"
+    item = drivers["items"]
+    assert item["properties"]["label"]["type"] == "string"
+    assert item["properties"]["positive"]["type"] == "boolean"
+    # direction-only: no numeric delta field on LLM-judged drivers
+    assert "delta" not in item["properties"]
+    for field in ("content_score", "verdict", "content_drivers"):
+        assert field in report.REPORT_SCHEMA["required"]
+
+
+def test_content_score_clamped(monkeypatch):
+    fake = FakeClient('{"summary": "ok", "roughest_window_index": -1, "content_score": 140}')
+    monkeypatch.setattr(report, "_get_client", lambda: fake)
+    result = asyncio.run(report.generate_report("hi", {}))
+    assert result["content_score"] == 100
+
+
 def test_roughest_index_normalization(monkeypatch):
     fake = FakeClient('{"summary": "ok", "roughest_window_index": 2}')
     monkeypatch.setattr(report, "_get_client", lambda: fake)
