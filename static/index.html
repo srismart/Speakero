@@ -273,8 +273,15 @@
       box-shadow: 0 0 8px var(--green);
       animation: pulse-dot 1.4s infinite;
     }
+    .status-dot.preparing {
+      background: var(--cyan);
+      box-shadow: 0 0 8px var(--cyan);
+      animation: pulse-dot 0.8s infinite;
+    }
     @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
-    .status-text { font-size: 0.82rem; color: var(--text-dim); }
+    .status-text { font-size: 0.82rem; color: var(--text-dim); transition: color 0.2s; }
+    .status-text.preparing { color: var(--cyan); font-weight: 700; animation: preparing-text 1s ease-in-out infinite; }
+    @keyframes preparing-text { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
 
     .controls-row {
       display: flex;
@@ -1367,6 +1374,7 @@
                 <button class="btn-hear btn-rough" id="btnPlayWorst">&#9654; Roughest</button>
                 <span class="replay-text" id="worstMomentText"></span>
               </div>
+              <p class="moment-note" id="roughestMomentText"></p>
             </div>
           </div>
         </div>
@@ -1769,9 +1777,12 @@
       toastTimer = setTimeout(() => t.classList.remove('show'), 4000);
     }
 
-    function setStatus(text, active = false) {
-      document.getElementById('statusText').textContent = text;
+    function setStatus(text, active = false, preparing = false) {
+      const textEl = document.getElementById('statusText');
+      textEl.textContent = text;
+      textEl.classList.toggle('preparing', preparing);
       document.getElementById('statusDot').classList.toggle('active', active);
+      document.getElementById('statusDot').classList.toggle('preparing', preparing);
       document.getElementById('listeningBadge').style.display = active ? 'flex' : 'none';
     }
 
@@ -2293,7 +2304,7 @@
       startBtn.classList.remove('pulsing');
       document.getElementById('btnReport').disabled = true;
       document.getElementById('reportLoading').style.display = 'block';
-      setStatus('Preparing debrief…');
+      setStatus('Preparing debrief…', false, true);
       const topic = document.getElementById('topicInput').value.trim();
       try {
         const res = await fetch('/api/report', {
@@ -2544,14 +2555,16 @@
       document.getElementById('bestMoment').style.display = showBest ? '' : 'none';
 
       const worstBtn = document.getElementById('btnPlayWorst');
+      const roughestNote = data.roughest_moment_note || '';
       document.getElementById('worstMomentText').textContent = (worst && worst.text) || '';
+      document.getElementById('roughestMomentText').textContent = roughestNote;
       if (haveAudio && worst) {
         worstBtn.style.display = '';
         worstBtn.onclick = () => togglePlay(worstBtn, 'Your roughest moment', () => makePcmSource(worst.start, worst.end, worst.epoch));
       } else {
         worstBtn.style.display = 'none';
       }
-      const showWorst = (haveAudio && worst) || (worst && worst.text);
+      const showWorst = (haveAudio && worst) || (worst && worst.text) || roughestNote;
       document.getElementById('worstMoment').style.display = showWorst ? '' : 'none';
       document.getElementById('momentsBlock').style.display = (showBest || showWorst) ? 'block' : 'none';
 
