@@ -2030,6 +2030,10 @@
     // button toggles play/stop, and a "now playing" pill offers a stop control.
     let currentAudio = null; // { src, btn }
     let playReq = 0;
+    // While coach/debrief audio plays out of the speakers, stop forwarding mic
+    // frames to STT — otherwise the coach's own voice loops back through the
+    // mic and gets transcribed (and counted) as the user's speech.
+    let micSendMuted = false;
 
     function setPlaybackUi(label, btn) {
       const bar = document.getElementById('playbackBar');
@@ -2049,6 +2053,7 @@
         try { currentAudio.src.onended = null; currentAudio.src.stop(); } catch (e) {}
         currentAudio = null;
       }
+      micSendMuted = false;
       setPlaybackUi(null);
     }
 
@@ -2069,7 +2074,8 @@
       if (req !== playReq) { try { src.disconnect(); } catch (e) {} return; } // superseded by a newer click
       currentAudio = { src, btn };
       setPlaybackUi(label, btn);
-      src.onended = () => { currentAudio = null; setPlaybackUi(null); };
+      micSendMuted = true;
+      src.onended = () => { currentAudio = null; micSendMuted = false; setPlaybackUi(null); };
       src.start();
     }
 
@@ -2139,7 +2145,7 @@
 
         sessionPcm.push(new Float32Array(float32));
 
-        if (!audioWs || audioWs.readyState !== WebSocket.OPEN) return;
+        if (!audioWs || audioWs.readyState !== WebSocket.OPEN || micSendMuted) return;
         const pcm16 = float32ToPcm16(float32);
         audioWs.send(pcm16.buffer);
       };
