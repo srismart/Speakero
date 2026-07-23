@@ -47,6 +47,12 @@ def test_schema_includes_content_score_fields():
         assert field in report.REPORT_SCHEMA["required"]
 
 
+def test_schema_includes_roughest_moment_note():
+    props = report.REPORT_SCHEMA["properties"]
+    assert props["roughest_moment_note"]["type"] == "string"
+    assert "roughest_moment_note" in report.REPORT_SCHEMA["required"]
+
+
 def test_content_score_clamped(monkeypatch):
     fake = FakeClient('{"summary": "ok", "roughest_window_index": -1, "content_score": 140}')
     monkeypatch.setattr(report, "_get_client", lambda: fake)
