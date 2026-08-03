@@ -41,3 +41,9 @@ def test_inline_script_is_valid_javascript():
         assert result.returncode == 0, f"node --check failed:\n{result.stderr}"
     finally:
         os.unlink(path)
+
+
+def test_consent_note_present():
+    html = _read_html()
+    assert "transcription only" in html
+    assert "never stored" in html
