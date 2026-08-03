@@ -145,11 +145,11 @@ def test_report_memoized(monkeypatch):
 
 import asyncio  # noqa: E402
 
-import tts  # noqa: E402
+import tts_provider  # noqa: E402
 
 
 def test_tts_cache_hits(monkeypatch):
-    tts._cache.clear()
+    tts_provider.reset_for_tests()
     calls = {"n": 0}
 
     class FakeResp:
@@ -170,8 +170,8 @@ def test_tts_cache_hits(monkeypatch):
             calls["n"] += 1
             return FakeResp()
 
-    monkeypatch.setattr(tts.httpx, "AsyncClient", FakeAsyncClient)
+    monkeypatch.setattr(tts_provider.httpx, "AsyncClient", FakeAsyncClient)
     monkeypatch.setenv("SMALLEST_API_KEY", "k")
-    assert asyncio.run(tts.speak("hello")) == b"WAVDATA"
-    assert asyncio.run(tts.speak("hello")) == b"WAVDATA"
+    assert asyncio.run(tts_provider.speak("hello")) == b"WAVDATA"
+    assert asyncio.run(tts_provider.speak("hello")) == b"WAVDATA"
     assert calls["n"] == 1

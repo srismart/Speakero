@@ -14,7 +14,7 @@ import socketio
 from dotenv import load_dotenv
 
 from filler_detector import FillerDetector
-from tts import speak
+from tts_provider import speak
 from report import generate_report
 from auth import verify_token
 import limits
