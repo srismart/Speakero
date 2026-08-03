@@ -14,7 +14,8 @@ import socketio
 from dotenv import load_dotenv
 
 from filler_detector import FillerDetector
-from tts import speak
+from stt_provider import STTEvent, get_stt_provider
+from tts_provider import speak
 from report import generate_report
 from auth import verify_token
 import limits
@@ -22,10 +23,8 @@ import scoring
 
 load_dotenv()
 
-SMALLEST_API_KEY = os.getenv("SMALLEST_API_KEY", "")
 ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 
-PULSE_WS_URL = "wss://api.smallest.ai/waves/v1/pulse/get_text"
 CHUNK_INTERVAL_SECONDS = 30
 GRACE_SECONDS = 90  # keep a disconnected session alive this long for reconnects
 
@@ -521,29 +520,23 @@ async def audio_ws(websocket: WebSocket):
         sess.last_final_at = time.time()
     print(f"[ws] Browser audio WebSocket connected (sid={sid}, sample_rate={sample_rate}, epoch={sess.stream_epoch})")
 
-    pulse_url = (
-        f"{PULSE_WS_URL}"
-        f"?sample_rate={sample_rate}"
-        f"&encoding=linear16"
-        f"&language=en"
-        f"&word_timestamps=true"
-    )
+    provider = get_stt_provider()
+    stt_url = provider.ws_url(sample_rate)
 
     try:
         async with websockets.connect(
-            pulse_url,
-            additional_headers={"Authorization": f"Bearer {SMALLEST_API_KEY}"},
+            stt_url,
+            additional_headers=provider.ws_headers(),
             ping_interval=20,
             ping_timeout=30,
-        ) as pulse_ws:
-            await _bridge_audio(websocket, pulse_ws, sess, sid)
+        ) as stt_ws:
+            await _bridge_audio(websocket, stt_ws, sess, sid, provider)
     except websockets.exceptions.InvalidURI:
-        print("[ws] WARNING: Could not connect to Pulse STT — running in offline mode")
+        print(f"[ws] WARNING: Could not connect to {provider.name} STT, running in offline mode")
         await _offline_mode(websocket, sess, sid)
     except Exception as e:
-        print(f"[ws] Pulse connection error: {type(e).__name__}: {e}")
-        print(f"[ws] Pulse URL was: {pulse_url}")
-        print(f"[ws] API key present: {bool(SMALLEST_API_KEY)}, len={len(SMALLEST_API_KEY)}")
+        print(f"[ws] {provider.name} connection error: {type(e).__name__}: {e}")
+        print(f"[ws] STT URL was: {stt_url}")
         await _offline_mode(websocket, sess, sid)
     finally:
         if sess.audio_ws is websocket:
@@ -551,55 +544,49 @@ async def audio_ws(websocket: WebSocket):
         print("[ws] Audio WebSocket closed")
 
 
-async def _bridge_audio(browser_ws: WebSocket, pulse_ws, sess: SessionState, sid: str):
-    async def forward_browser_to_pulse():
+async def _bridge_audio(browser_ws: WebSocket, stt_ws, sess: SessionState, sid: str, provider):
+    async def forward_browser_to_stt():
         try:
             while True:
                 chunk = await browser_ws.receive_bytes()
-                await pulse_ws.send(chunk)
+                await stt_ws.send(chunk)
         except WebSocketDisconnect:
             pass
         except Exception as e:
-            print(f"[ws] Browser→Pulse error: {e}")
+            print(f"[ws] Browser→STT error: {e}")
         finally:
-            # Tear down the Pulse leg as soon as the browser leg ends (client
-            # disconnect or watchdog close); otherwise the pulse->frontend
-            # forwarder lingers until Pulse's ping timeout.
+            # Tear down the STT leg as soon as the browser leg ends (client
+            # disconnect or watchdog close); otherwise the stt->frontend
+            # forwarder lingers until the provider's ping timeout.
             try:
-                await pulse_ws.close()
+                await stt_ws.close()
             except Exception:
                 pass
 
-    async def forward_pulse_to_frontend():
+    async def forward_stt_to_frontend():
         try:
-            async for raw_msg in pulse_ws:
-                await _handle_pulse_message(raw_msg, sess, sid)
+            async for raw_msg in stt_ws:
+                event = provider.parse(raw_msg)
+                if event is None:
+                    print(f"[ws] Failed to parse {provider.name} message")
+                    continue
+                await _handle_stt_event(event, sess, sid)
         except Exception as e:
-            print(f"[ws] Pulse→frontend error: {e}")
+            print(f"[ws] STT→frontend error: {e}")
 
     await asyncio.gather(
-        forward_browser_to_pulse(),
-        forward_pulse_to_frontend(),
+        forward_browser_to_stt(),
+        forward_stt_to_frontend(),
     )
 
 
-async def _handle_pulse_message(raw_msg: str | bytes, sess: SessionState, sid: str):
-    try:
-        if isinstance(raw_msg, bytes):
-            raw_msg = raw_msg.decode("utf-8")
-        data = json.loads(raw_msg)
-    except (json.JSONDecodeError, UnicodeDecodeError) as e:
-        print(f"[ws] Failed to parse Pulse message: {e}")
-        return
-
-    msg_type = data.get("type", "")
-    is_final = data.get("is_final", data.get("isFinal", False))
-
-    words = data.get("words", [])
-    transcript_text = data.get("transcript", data.get("text", ""))
+async def _handle_stt_event(event: STTEvent, sess: SessionState, sid: str):
+    is_final = event.is_final
+    words = event.words
+    transcript_text = event.text
 
     if words:
-        print(f"[pulse] words: {[w.get('word') for w in words]}")
+        print(f"[stt] words: {[w.get('word') for w in words]}")
         result = sess.detector.process_words(words, epoch=max(sess.stream_epoch, 0))
         new_fillers = result["new_fillers"]
         stats = result["stats"]

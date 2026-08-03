@@ -19,9 +19,10 @@ It captures mic audio, detects filler words live, sends Claude-powered coaching 
 
 | File | Status | Purpose |
 |---|---|---|
-| `main.py` | ✅ Complete | FastAPI + socket.io ASGI app. Per-sid session management, Pulse STT bridge, coaching loop, all REST endpoints. |
+| `main.py` | ✅ Complete | FastAPI + socket.io ASGI app. Per-sid session management, STT bridge (provider-agnostic), coaching loop, all REST endpoints. |
 | `filler_detector.py` | ✅ Complete | Filler word/phrase detection, WPM, pause gaps, streak detection (3 in 10s), highlight window tracking. |
-| `tts.py` | ✅ Complete | smallest.ai Lightning TTS wrapper (async). |
+| `stt_provider.py` | ✅ Complete (2026-08-03) | Streaming-STT abstraction. `get_stt_provider()` reads `STT_PROVIDER` env (default `pulse`); providers expose `ws_url`/`ws_headers`/`parse` returning a normalized `STTEvent`. |
+| `tts_provider.py` | ✅ Complete (2026-08-03) | TTS abstraction + provider-agnostic LRU cache and `speak()`. `get_tts_provider()` reads `TTS_PROVIDER` env (default `smallest` = Lightning via REST). Replaces the deleted `tts.py`. |
 | `report.py` | ✅ Complete | Claude Sonnet debrief: strengths, improvements, content feedback, repetition/jargon flags, sentence completion, highlight moment, spoken feedback, example extract. |
 | `static/index.html` | ✅ Complete | Full SPA: bento grid UI, floating control bar, animated visualizer, inline filler highlighting, debrief modal. Passes `socket.id` to all API calls and the audio WS. |
 | `requirements.txt` | ✅ Complete | `smallestai`, `anthropic`, `fastapi`, `uvicorn`, `python-socketio`, `websockets`, `httpx`, etc. |
@@ -135,12 +136,12 @@ Not yet merged to `main`.
 
 ## Next Steps (in order)
 
-1. **Merge `refactor/single-process-voice-api` → `main`** — open PR, review, merge
-2. **stt_provider.py + tts_provider.py abstraction** — swap smallest.ai without touching main.py
-3. **User auth** — Clerk
-4. **Session persistence** — Supabase
-5. **Usage metering + billing** — Stripe
-6. **Session history UI + PDF export**
+1. ~~Merge `refactor/single-process-voice-api` into `main`~~ done (PR #1)
+2. ~~stt_provider.py + tts_provider.py abstraction~~ done 2026-08-03 (swap smallest.ai via `STT_PROVIDER` / `TTS_PROVIDER` env, no main.py changes)
+3. **Session persistence** (Supabase): Spec B covers sessions, history UI, progress chart
+4. **Usage metering + billing** (Stripe): Spec C
+5. **Deterministic nudge layer**: canned nudges as pre-synthesized audio, the cost/latency lever
+6. **Voice-clone replay**: Cartesia Sonic 3 via tts_provider, "Hear yourself, perfected"
 
 ---
 
