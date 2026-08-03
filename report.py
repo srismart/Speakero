@@ -37,6 +37,7 @@ REPORT_SCHEMA = {
         "jargon_flags": _str_array(),
         "sentence_completion_rate": {"type": "string"},
         "highlight_moment": {"type": "string"},
+        "roughest_moment_note": {"type": "string"},
         "content_score": {"type": "integer"},
         "verdict": {"type": "string"},
         # Direction-only drivers: an LLM judgment does not warrant fake-precision
@@ -58,7 +59,7 @@ REPORT_SCHEMA = {
         "roughest_window_index", "topic_identified", "strengths", "improvements",
         "content_feedback", "summary", "spoken_feedback", "example_extract",
         "repetition_flags", "jargon_flags", "sentence_completion_rate", "highlight_moment",
-        "content_score", "verdict", "content_drivers",
+        "roughest_moment_note", "content_score", "verdict", "content_drivers",
     ],
     "additionalProperties": False,
 }
@@ -128,10 +129,16 @@ async def generate_report(
             f"{window_lines}\n"
             "For 'roughest_window_index', pick the index of the window with the ROUGHEST "
             "delivery: most rambling, abandoned thoughts, awkward pauses, or filler. "
-            "If none stands out, pick the most filler-heavy one."
+            "If none stands out, pick the most filler-heavy one. In 'roughest_moment_note', "
+            "say in one short sentence what specifically made that window rough (e.g. "
+            "'trailed off before finishing the thought', 'three filler words in a row'), "
+            "quoting or referencing the window's own text."
         )
     else:
-        roughest_section = "\n(No candidate windows available; set 'roughest_window_index' to -1.)"
+        roughest_section = (
+            "\n(No candidate windows available; set 'roughest_window_index' to -1 and "
+            "'roughest_moment_note' to empty string.)"
+        )
 
     prompt = f"""You are an expert speaking coach. Analyze this practice session transcript and stats.
 
@@ -160,6 +167,7 @@ Field guidance:
 - sentence_completion_rate: like "Good - most sentences were completed" or "Needs work - several abandoned thoughts".
 - highlight_moment: comment on the best delivery window, or empty string if none was provided.
 - roughest_window_index: integer index from the candidate list, or -1.
+- roughest_moment_note: one sentence on what made the roughest window rough, or empty string.
 - content_score: 0-100 judging CONTENT ONLY (structure, relevance, clarity of ideas,
   persuasiveness) - not delivery mechanics like fillers or pace, which are scored
   separately. Anchors: 85+ compelling and well-structured, 70-84 solid with gaps,
