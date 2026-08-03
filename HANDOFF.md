@@ -136,12 +136,12 @@ Not yet merged to `main`.
 
 ## Next Steps (in order)
 
-1. ~~Merge `refactor/single-process-voice-api` → `main`~~ — done (PR #1)
-2. ~~stt_provider.py + tts_provider.py abstraction~~ — done 2026-08-03 (swap smallest.ai via `STT_PROVIDER` / `TTS_PROVIDER` env, no main.py changes)
-3. **Session persistence** — Supabase (Spec B: sessions, history UI, progress chart)
-4. **Usage metering + billing** — Stripe (Spec C)
-5. **Deterministic nudge layer** — canned nudges as pre-synthesized audio; the cost/latency lever
-6. **Voice-clone replay** — Cartesia Sonic 3 via tts_provider, "Hear yourself, perfected"
+1. ~~Merge `refactor/single-process-voice-api` into `main`~~ done (PR #1)
+2. ~~stt_provider.py + tts_provider.py abstraction~~ done 2026-08-03 (swap smallest.ai via `STT_PROVIDER` / `TTS_PROVIDER` env, no main.py changes)
+3. **Session persistence** (Supabase): Spec B covers sessions, history UI, progress chart
+4. **Usage metering + billing** (Stripe): Spec C
+5. **Deterministic nudge layer**: canned nudges as pre-synthesized audio, the cost/latency lever
+6. **Voice-clone replay**: Cartesia Sonic 3 via tts_provider, "Hear yourself, perfected"
 
 ---
 

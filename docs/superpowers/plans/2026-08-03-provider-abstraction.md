@@ -80,7 +80,7 @@ def test_smallest_requires_api_key(monkeypatch):
         asyncio.run(tts_provider.SmallestLightningTTS().synthesize("x"))
 ```
 
-- [ ] **Step 2: Run to verify fail** — `python -m pytest tests/test_tts_provider.py -q` → ModuleNotFoundError
+- [ ] **Step 2: Run to verify fail** - `python -m pytest tests/test_tts_provider.py -q` → ModuleNotFoundError
 
 - [ ] **Step 3: Implement `tts_provider.py`** (logic moved from tts.py; REST-direct rationale comment preserved)
 
@@ -184,9 +184,9 @@ async def speak(text: str) -> bytes:
 
 - [ ] **Step 4: Rewire.** `main.py:17` → `from tts_provider import speak`. Delete `tts.py` (`git rm tts.py`). Update `tests/test_guardrail_endpoints.py` tts block: `import tts_provider` instead of `import tts`; `tts_provider.reset_for_tests()` instead of `tts._cache.clear()`; monkeypatch `tts_provider.httpx`; call `tts_provider.speak`.
 
-- [ ] **Step 5: Run full suite** — `python -m pytest -q` → all pass
+- [ ] **Step 5: Run full suite** - `python -m pytest -q` → all pass
 
-- [ ] **Step 6: Commit** — `git add -A && git commit -m "refactor: tts_provider abstraction, smallest.ai behind TTS_PROVIDER env"`
+- [ ] **Step 6: Commit** - `git add -A && git commit -m "refactor: tts_provider abstraction, smallest.ai behind TTS_PROVIDER env"`
 
 ### Task 2: stt_provider.py
 
@@ -340,13 +340,13 @@ def get_stt_provider() -> STTProvider:
   - `audio_ws`: `provider = get_stt_provider()`; connect to `provider.ws_url(sample_rate)` with `additional_headers=provider.ws_headers()`; pass `provider` into `_bridge_audio`; log line uses `provider.name`.
   - `_bridge_audio(browser_ws, stt_ws, sess, sid, provider)`: pulse→frontend forwarder becomes `event = provider.parse(raw_msg)`; `if event is None: print parse warning; continue`; `await _handle_stt_event(event, sess, sid)`.
   - Rename `_handle_pulse_message` → `_handle_stt_event(event: STTEvent, sess, sid)`; body drops its own json parsing and reads `event.words` / `event.text` / `event.is_final`; the two-branch structure (words path, text path) is unchanged.
-- [ ] **Step 5: Run full suite** — `python -m pytest -q` → all pass
-- [ ] **Step 6: Commit** — `git add -A && git commit -m "refactor: stt_provider abstraction, Pulse behind STT_PROVIDER env"`
+- [ ] **Step 5: Run full suite** - `python -m pytest -q` → all pass
+- [ ] **Step 6: Commit** - `git add -A && git commit -m "refactor: stt_provider abstraction, Pulse behind STT_PROVIDER env"`
 
 ### Task 3: Docs + PR
 
 - [ ] **Step 1:** `.env.example`: add `STT_PROVIDER=pulse` and `TTS_PROVIDER=smallest` with a comment (`# Voice provider selection; current options: pulse / smallest`).
-- [ ] **Step 2:** CLAUDE.md: mark priority 1 done — change `1. stt_provider.py + tts_provider.py abstraction layer` to `1. (done 2026-08-03) stt_provider.py + tts_provider.py abstraction layer`. HANDOFF.md: same change in Next Steps; add both new files to the File Map.
+- [ ] **Step 2:** CLAUDE.md: mark priority 1 done - change `1. stt_provider.py + tts_provider.py abstraction layer` to `1. (done 2026-08-03) stt_provider.py + tts_provider.py abstraction layer`. HANDOFF.md: same change in Next Steps; add both new files to the File Map.
 - [ ] **Step 3:** Commit docs; push; `gh pr create` (title "Provider abstraction: stt_provider + tts_provider"); wait CI; code-review pass; fix findings; squash-merge.
 
 ## Self-review

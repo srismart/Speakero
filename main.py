@@ -532,7 +532,7 @@ async def audio_ws(websocket: WebSocket):
         ) as stt_ws:
             await _bridge_audio(websocket, stt_ws, sess, sid, provider)
     except websockets.exceptions.InvalidURI:
-        print(f"[ws] WARNING: Could not connect to {provider.name} STT — running in offline mode")
+        print(f"[ws] WARNING: Could not connect to {provider.name} STT, running in offline mode")
         await _offline_mode(websocket, sess, sid)
     except Exception as e:
         print(f"[ws] {provider.name} connection error: {type(e).__name__}: {e}")
