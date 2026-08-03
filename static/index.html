@@ -1760,6 +1760,18 @@
           }
           break;
         }
+        case 'auto_stopped': {
+          sessionActive = false;
+          stopAudioCapture();
+          stopTimer();
+          setVisualizerActive(false);
+          document.getElementById('btnStart').disabled = false;
+          document.getElementById('btnStart').classList.add('pulsing');
+          document.getElementById('btnStop').disabled = true;
+          setStatus('Ended: no speech detected');
+          showToast('Session ended after 3 minutes of silence. Your debrief is still available.');
+          break;
+        }
         case 'filler_streak':
           showStreakAlert();
           break;

@@ -28,6 +28,8 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 PULSE_WS_URL = "wss://api.smallest.ai/waves/v1/pulse/get_text"
 CHUNK_INTERVAL_SECONDS = 30
 GRACE_SECONDS = 90  # keep a disconnected session alive this long for reconnects
+SILENCE_TIMEOUT_SECONDS = float(os.getenv("SILENCE_TIMEOUT_SECONDS", "180"))  # 0 disables
+SILENCE_CHECK_INTERVAL_SECONDS = 15
 
 def _parse_allowed_origins(raw: str):
     """Comma-separated origin allowlist; '*' or empty means allow all (dev default)."""
@@ -61,6 +63,8 @@ class SessionState:
         self.tier: str = "anonymous"
         self.stream_epoch: int = -1  # increments per audio-WS connect; Pulse clock resets each time
         self.limit_task: asyncio.Task | None = None
+        self.last_final_at: float | None = None
+        self.silence_task: asyncio.Task | None = None
         self.tts_calls: int = 0
         self.report_cache: dict | None = None
         self.usage: dict = {"input_tokens": 0, "output_tokens": 0, "llm_calls": 0}
@@ -72,6 +76,7 @@ class SessionState:
         self.start_time = time.time()
         self.highlight_window = ""
         self.stream_epoch = -1
+        self.last_final_at = time.time()
         self._transcript_buffer.clear()
 
     def stop(self):
@@ -150,6 +155,30 @@ async def _get_nudge_from_claude(transcript_snippet: str, sess: SessionState) ->
     return message.content[0].text.strip()
 
 
+def _silence_exceeded(sess: "SessionState", now: float, timeout: float) -> bool:
+    """True when an active session has heard no final transcript for `timeout`s.
+    A dead mic still streams audio to STT, so this is the only spend guard for
+    abandoned tabs below the tier time cap."""
+    if not sess.active or timeout <= 0:
+        return False
+    last = sess.last_final_at or sess.start_time or now
+    return (now - last) > timeout
+
+
+async def _silence_watchdog(sess: "SessionState"):
+    while sess.active:
+        await asyncio.sleep(SILENCE_CHECK_INTERVAL_SECONDS)
+        if _silence_exceeded(sess, time.time(), SILENCE_TIMEOUT_SECONDS):
+            sess.stop()
+            if sess.coaching_task and not sess.coaching_task.done():
+                sess.coaching_task.cancel()
+            if sess.limit_task and not sess.limit_task.done():
+                sess.limit_task.cancel()
+            _log_session_usage(sess, "silence")
+            await sio.emit("event", {"type": "auto_stopped", "reason": "silence"}, room=sess.room)
+            return
+
+
 async def coaching_loop(sess: SessionState):
     print(f"[agent] Coaching loop started for {sess.room}")
     while True:
@@ -210,6 +239,8 @@ async def disconnect(sid):
             gone.coaching_task.cancel()
         if gone and gone.limit_task and not gone.limit_task.done():
             gone.limit_task.cancel()
+        if gone and gone.silence_task and not gone.silence_task.done():
+            gone.silence_task.cancel()
         print(f"[sio] Session {sid} cleaned up after grace period")
 
     sess.cleanup_task = asyncio.create_task(_cleanup())
@@ -403,6 +434,8 @@ async def api_start(request: Request):
 
     if sess.limit_task and not sess.limit_task.done():
         sess.limit_task.cancel()
+    if sess.silence_task and not sess.silence_task.done():
+        sess.silence_task.cancel()
 
     async def _limit_stop():
         await asyncio.sleep(minutes * 60)
@@ -411,10 +444,13 @@ async def api_start(request: Request):
         sess.stop()
         if sess.coaching_task and not sess.coaching_task.done():
             sess.coaching_task.cancel()
+        if sess.silence_task and not sess.silence_task.done():
+            sess.silence_task.cancel()
         _log_session_usage(sess, "limit")
         await sio.emit("event", {"type": "session_limit", "tier": sess.tier}, room=sess.room)
 
     sess.limit_task = asyncio.create_task(_limit_stop())
+    sess.silence_task = asyncio.create_task(_silence_watchdog(sess))
     return JSONResponse({"status": "started", "max_minutes": minutes})
 
 
@@ -439,6 +475,9 @@ async def api_stop(request: Request):
     if sess.limit_task and not sess.limit_task.done():
         sess.limit_task.cancel()
     sess.limit_task = None
+    if sess.silence_task and not sess.silence_task.done():
+        sess.silence_task.cancel()
+    sess.silence_task = None
     _log_session_usage(sess, "user")
     return JSONResponse({"status": "stopped"})
 
@@ -541,11 +580,13 @@ async def _handle_pulse_message(raw_msg: str | bytes, sess: SessionState, sid: s
             await sio.emit("event", {"type": "filler_streak"}, room=sid)
 
         if is_final and text_from_words.strip():
+            sess.last_final_at = time.time()
             async with sess._buffer_lock:
                 sess._transcript_buffer.append(text_from_words)
 
     elif transcript_text:
         if is_final:
+            sess.last_final_at = time.time()
             dummy_words = [
                 {"word": w, "start": 0.0, "end": 0.0}
                 for w in transcript_text.split()
