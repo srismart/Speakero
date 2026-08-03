@@ -21,6 +21,7 @@ from auth import verify_token
 import limits
 import scoring
 import feedback
+import persistence
 
 load_dotenv()
 
@@ -387,6 +388,16 @@ async def api_report(request: Request):
             roughest_index=report.pop("roughest_window_index", None)
         )
         sess.report_cache = report
+        # Persist once, in the generation path only (cached returns bail out
+        # above), for signed-in users. Fail-open: never blocks the debrief.
+        persistence.record_session(sess.user_id, persistence.build_summary(
+            topic=topic, mode=mode, stats=stats,
+            total_words=sess.detector.total_words,
+            duration_seconds=sess.elapsed_seconds(),
+            delivery=report.get("delivery"),
+            content_score=report.get("content_score"),
+            verdict=report.get("verdict", ""),
+        ))
         return JSONResponse(report)
     except Exception as e:
         # Stats and replay windows are computed locally — never lose the session
