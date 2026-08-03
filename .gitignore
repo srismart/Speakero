@@ -9,3 +9,6 @@ build/
 .venv/
 venv/
 .playwright-mcp/
+Raw Dumps/
+.claude/launch.json
+.pytest_cache/
