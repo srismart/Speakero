@@ -965,6 +965,45 @@
       transition: background 0.15s;
     }
     .pro-upsell:hover { background: var(--accent-soft); }
+    .feedback-block {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-top: 18px;
+      padding-top: 14px;
+      border-top: 1px solid var(--border);
+    }
+    .feedback-prompt { font-size: 0.82rem; color: var(--text-dim); }
+    .feedback-actions { display: flex; gap: 6px; }
+    .feedback-btn {
+      border: 1px solid var(--border);
+      background: var(--surface2);
+      border-radius: 8px;
+      padding: 4px 10px;
+      font-size: 1rem;
+      cursor: pointer;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    .feedback-btn:hover { background: var(--accent-soft); }
+    .feedback-btn.selected { border-color: var(--accent); background: var(--accent-soft); }
+    .feedback-comment {
+      display: flex;
+      gap: 8px;
+      width: 100%;
+      align-items: flex-start;
+    }
+    .feedback-comment textarea {
+      flex: 1;
+      resize: vertical;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: var(--surface2);
+      color: var(--text);
+      font-family: var(--font-ui);
+      font-size: 0.82rem;
+      padding: 8px;
+    }
     .pro-upsell-badge {
       flex-shrink: 0;
       font-size: 0.6rem;
@@ -1428,6 +1467,19 @@
             <div class="chips-row" id="repetitionChips"></div>
             <div class="chips-row" id="jargonChips"></div>
             <div class="completion-line" id="sentenceCompletion"></div>
+          </div>
+        </div>
+
+        <!-- Debrief feedback -->
+        <div class="feedback-block" id="feedbackBlock">
+          <span class="feedback-prompt" id="feedbackPrompt">Was this debrief helpful?</span>
+          <div class="feedback-actions" id="feedbackActions">
+            <button class="feedback-btn" id="feedbackUp" title="Helpful" aria-label="Helpful">&#128077;</button>
+            <button class="feedback-btn" id="feedbackDown" title="Not helpful" aria-label="Not helpful">&#128078;</button>
+          </div>
+          <div class="feedback-comment" id="feedbackComment" style="display:none">
+            <textarea id="feedbackText" rows="2" placeholder="What could be better? (optional)"></textarea>
+            <button class="btn-hear" id="feedbackSend">Send</button>
           </div>
         </div>
       </div>
@@ -2358,6 +2410,44 @@
       document.getElementById('debriefSection').classList.remove('open');
     });
 
+    // ── Debrief feedback ───────────────────────────────────────────────────────
+    let feedbackRating = null;
+    async function sendFeedback(comment) {
+      if (!feedbackRating) return;
+      try {
+        await fetch('/api/feedback', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...authHeaders() },
+          body: JSON.stringify({ sid: socket.id, rating: feedbackRating, comment: comment || '' }),
+        });
+      } catch (e) { /* fire-and-forget: feedback is best-effort */ }
+    }
+    function resetFeedback() {
+      feedbackRating = null;
+      document.getElementById('feedbackPrompt').textContent = 'Was this debrief helpful?';
+      document.getElementById('feedbackActions').style.display = '';
+      document.getElementById('feedbackComment').style.display = 'none';
+      document.getElementById('feedbackText').value = '';
+      document.getElementById('feedbackUp').classList.remove('selected');
+      document.getElementById('feedbackDown').classList.remove('selected');
+    }
+    function pickRating(rating) {
+      feedbackRating = rating;
+      document.getElementById('feedbackUp').classList.toggle('selected', rating === 'up');
+      document.getElementById('feedbackDown').classList.toggle('selected', rating === 'down');
+      document.getElementById('feedbackComment').style.display = 'flex';
+      sendFeedback('');  // record the rating immediately; comment is an optional follow-up
+    }
+    document.getElementById('feedbackUp').addEventListener('click', () => pickRating('up'));
+    document.getElementById('feedbackDown').addEventListener('click', () => pickRating('down'));
+    document.getElementById('feedbackSend').addEventListener('click', async () => {
+      const comment = document.getElementById('feedbackText').value.trim();
+      if (comment) await sendFeedback(comment);
+      document.getElementById('feedbackActions').style.display = 'none';
+      document.getElementById('feedbackComment').style.display = 'none';
+      document.getElementById('feedbackPrompt').textContent = 'Thanks for the feedback!';
+    });
+
     // ── Debrief rendering ──────────────────────────────────────────────────────
     function renderList(id, items, className) {
       const el = document.getElementById(id);
@@ -2486,6 +2576,7 @@
     }
 
     function renderDebrief(data) {
+      resetFeedback();
       document.getElementById('debriefTopic').textContent = data.topic_identified ? '— ' + data.topic_identified : '';
 
       renderScores(data);

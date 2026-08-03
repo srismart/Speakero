@@ -20,6 +20,7 @@ from report import generate_report
 from auth import verify_token
 import limits
 import scoring
+import feedback
 
 load_dotenv()
 
@@ -402,6 +403,36 @@ async def api_report(request: Request):
             "transcript": transcript,
             "replay": sess.detector.get_replay_windows(),
         })
+
+
+@fastapi_app.post("/api/feedback")
+async def api_feedback(request: Request):
+    data = {}
+    try:
+        data = await request.json()
+    except Exception:
+        pass
+    sid = data.get("sid", "")
+    sess = SESSIONS.get(sid)
+    if sess is None:
+        return JSONResponse({"error": "unknown session"}, status_code=404)
+    _ctx, err = _binding_check(request, sess)
+    if err:
+        return err
+    rating = data.get("rating", "")
+    if rating not in ("up", "down"):
+        return JSONResponse({"error": "rating must be 'up' or 'down'"}, status_code=400)
+    persisted = feedback.record_feedback(
+        sess.user_id, sid, rating, data.get("comment", ""), sess.topic
+    )
+    print(json.dumps({
+        "event": "debrief_feedback",
+        "user_id": sess.user_id,
+        "tier": sess.tier,
+        "rating": rating,
+        "persisted": persisted,
+    }))
+    return JSONResponse({"status": "ok"})
 
 
 def _log_session_usage(sess: SessionState, ended_by: str):
