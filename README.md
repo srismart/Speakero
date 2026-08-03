@@ -1,5 +1,7 @@
 # Speakero — Real-time AI Speaking Coach
 
+![CI](https://github.com/srismart/Speakero/actions/workflows/ci.yml/badge.svg)
+
 **Speakero** is a real-time AI speaking coach that listens as you speak, catches filler words the moment they happen, measures your pace and pauses, delivers live coaching nudges via voice, and generates a full Claude-powered debrief at the end of your session.
 
 ---
