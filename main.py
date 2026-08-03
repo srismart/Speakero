@@ -28,7 +28,16 @@ ANTHROPIC_API_KEY = os.getenv("ANTHROPIC_API_KEY", "")
 PULSE_WS_URL = "wss://api.smallest.ai/waves/v1/pulse/get_text"
 CHUNK_INTERVAL_SECONDS = 30
 GRACE_SECONDS = 90  # keep a disconnected session alive this long for reconnects
-SILENCE_TIMEOUT_SECONDS = float(os.getenv("SILENCE_TIMEOUT_SECONDS", "180"))  # 0 disables
+
+
+def _env_float(name: str, default: float) -> float:
+    try:
+        return float(os.getenv(name) or default)
+    except ValueError:
+        return default
+
+
+SILENCE_TIMEOUT_SECONDS = _env_float("SILENCE_TIMEOUT_SECONDS", 180.0)  # 0 disables
 SILENCE_CHECK_INTERVAL_SECONDS = 15
 
 def _parse_allowed_origins(raw: str):
@@ -65,6 +74,7 @@ class SessionState:
         self.limit_task: asyncio.Task | None = None
         self.last_final_at: float | None = None
         self.silence_task: asyncio.Task | None = None
+        self.audio_ws: WebSocket | None = None
         self.tts_calls: int = 0
         self.report_cache: dict | None = None
         self.usage: dict = {"input_tokens": 0, "output_tokens": 0, "llm_calls": 0}
@@ -175,7 +185,19 @@ async def _silence_watchdog(sess: "SessionState"):
             if sess.limit_task and not sess.limit_task.done():
                 sess.limit_task.cancel()
             _log_session_usage(sess, "silence")
-            await sio.emit("event", {"type": "auto_stopped", "reason": "silence"}, room=sess.room)
+            await sio.emit("event", {
+                "type": "auto_stopped",
+                "reason": "silence",
+                "timeout_seconds": SILENCE_TIMEOUT_SECONDS,
+            }, room=sess.room)
+            # Cut the server-side audio bridge too: the client may be wedged,
+            # and forwarding to STT is the spend this guard exists to cap.
+            ws = sess.audio_ws
+            if ws is not None:
+                try:
+                    await ws.close(code=4005)
+                except Exception:
+                    pass
             return
 
 
@@ -492,6 +514,11 @@ async def audio_ws(websocket: WebSocket):
         await websocket.close(code=4004)
         return
     sess.stream_epoch += 1
+    sess.audio_ws = websocket
+    if sess.active:
+        # Fresh silence grace on every (re)connect so a network blip that just
+        # healed is not immediately judged as user silence.
+        sess.last_final_at = time.time()
     print(f"[ws] Browser audio WebSocket connected (sid={sid}, sample_rate={sample_rate}, epoch={sess.stream_epoch})")
 
     pulse_url = (
@@ -519,6 +546,8 @@ async def audio_ws(websocket: WebSocket):
         print(f"[ws] API key present: {bool(SMALLEST_API_KEY)}, len={len(SMALLEST_API_KEY)}")
         await _offline_mode(websocket, sess, sid)
     finally:
+        if sess.audio_ws is websocket:
+            sess.audio_ws = None
         print("[ws] Audio WebSocket closed")
 
 
@@ -532,6 +561,14 @@ async def _bridge_audio(browser_ws: WebSocket, pulse_ws, sess: SessionState, sid
             pass
         except Exception as e:
             print(f"[ws] Browser→Pulse error: {e}")
+        finally:
+            # Tear down the Pulse leg as soon as the browser leg ends (client
+            # disconnect or watchdog close); otherwise the pulse->frontend
+            # forwarder lingers until Pulse's ping timeout.
+            try:
+                await pulse_ws.close()
+            except Exception:
+                pass
 
     async def forward_pulse_to_frontend():
         try:
@@ -625,6 +662,7 @@ async def _offline_mode(websocket: WebSocket, sess: SessionState, sid: str):
                 result = sess.detector.process_words(word_obj)
                 text = word_obj[0]["word"]
                 sess.add_text(text)
+                sess.last_final_at = time.time()  # offline mode must not trip the silence watchdog
                 await sio.emit("event", {"type": "transcript", "text": text, "is_final": True}, room=sid)
                 await sio.emit("event", {"type": "stats", **result["stats"]}, room=sid)
                 if result["new_fillers"]:

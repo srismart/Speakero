@@ -1769,7 +1769,8 @@
           document.getElementById('btnStart').classList.add('pulsing');
           document.getElementById('btnStop').disabled = true;
           setStatus('Ended: no speech detected');
-          showToast('Session ended after 3 minutes of silence. Your debrief is still available.');
+          const silenceMins = Math.max(1, Math.round((data.timeout_seconds || 180) / 60));
+          showToast('Session ended after ' + silenceMins + (silenceMins === 1 ? ' minute' : ' minutes') + ' of silence. Your debrief is still available.');
           break;
         }
         case 'filler_streak':
