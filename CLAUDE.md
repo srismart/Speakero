@@ -30,7 +30,7 @@ uvicorn main:app --port 8080
 
 ## Current priorities (in order)
 
-1. stt_provider.py + tts_provider.py abstraction layer
+1. (done 2026-08-03) stt_provider.py + tts_provider.py abstraction layer
 2. User auth (Clerk)
 3. Session persistence (Supabase)
 4. Usage metering + Stripe billing
