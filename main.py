@@ -234,6 +234,11 @@ async def api_config():
     })
 
 
+@fastapi_app.get("/healthz")
+async def healthz():
+    return JSONResponse({"status": "ok", "sessions": len(SESSIONS)})
+
+
 def _binding_check(request: Request, sess: SessionState):
     """Returns (auth_ctx, error_response|None). A session with an owner may
     only be driven by that owner; anonymous sessions are open (no identity
