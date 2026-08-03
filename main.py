@@ -29,7 +29,18 @@ PULSE_WS_URL = "wss://api.smallest.ai/waves/v1/pulse/get_text"
 CHUNK_INTERVAL_SECONDS = 30
 GRACE_SECONDS = 90  # keep a disconnected session alive this long for reconnects
 
-sio = socketio.AsyncServer(async_mode="asgi", cors_allowed_origins="*")
+def _parse_allowed_origins(raw: str):
+    """Comma-separated origin allowlist; '*' or empty means allow all (dev default)."""
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    if not origins or origins == ["*"]:
+        return "*"
+    return origins
+
+
+sio = socketio.AsyncServer(
+    async_mode="asgi",
+    cors_allowed_origins=_parse_allowed_origins(os.getenv("ALLOWED_ORIGINS", "*")),
+)
 
 
 class SessionState:
